@@ -4,8 +4,31 @@
 // window.__anitrackBooted, later errors are left to the app, and a missing poster or other failed
 // resource load never counts (those error events have no script error attached).
 (() => {
+  // Forget saved copies of the app (the offline cache and its service worker) and load it fresh.
+  // Posters are kept. Used by the Reload button, and once automatically when the app fails to start,
+  // because the usual cause is a phone holding on to an old broken file.
+  const reloadFresh = async () => {
+    try {
+      for (const k of (await caches?.keys?.()) || []) if (k.startsWith('anitrack-') && !k.startsWith('anitrack-img')) await caches.delete(k);
+      for (const r of (await navigator.serviceWorker?.getRegistrations?.()) || []) await r.unregister();
+    } catch {
+      /* nothing cached */
+    }
+    location.reload();
+  };
   const show = (message) => {
     if (window.__anitrackBooted || document.getElementById('boot-error')) return;
+    let tried = '1';
+    try {
+      tried = sessionStorage.getItem('anitrack:freshReload');
+      sessionStorage.setItem('anitrack:freshReload', '1');
+    } catch {
+      /* no storage: just show the screen */
+    }
+    if (!tried) {
+      reloadFresh();
+      return;
+    }
     const box = document.createElement('main');
     box.id = 'boot-error';
     box.setAttribute('role', 'alert');
@@ -17,11 +40,15 @@
     h.textContent = 'AniTrack could not start';
     const p = document.createElement('p');
     p.style.cssText = 'margin:0 0 16px;opacity:.8';
-    p.textContent = 'Close the app fully and open it again. If this keeps happening, the message below says what broke.';
+    p.textContent = 'Tap Reload to fetch a fresh copy. If this keeps happening, the message below says what broke.';
+    const btn = document.createElement('button');
+    btn.textContent = 'Reload';
+    btn.style.cssText = 'margin:0 0 16px;padding:10px 22px;border:0;border-radius:12px;background:#fff;color:#000;font:600 16px system-ui,sans-serif';
+    btn.addEventListener('click', reloadFresh);
     const pre = document.createElement('pre');
     pre.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;background:#17171c;padding:14px;border-radius:10px;font-size:13px';
     pre.textContent = String(message || 'Unknown error').slice(0, 2000);
-    card.append(h, p, pre);
+    card.append(h, p, btn, pre);
     box.append(card);
     document.body.append(box);
   };

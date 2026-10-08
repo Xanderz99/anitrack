@@ -2,13 +2,15 @@
 // AniList data is never cached here (the app keeps its own copy).
 // Posters and banners from AniList's image server are cache-first: they never change at a given URL,
 // and iOS often empties a Home Screen app's normal browser cache, which made every launch re-download them.
-const CACHE = 'anitrack-v3';
+// The build replaces __BUILD__ with a hash of the app files, so every release is a new service worker
+// with a fresh cache, and the old release's files are deleted when it takes over.
+const CACHE = 'anitrack-910a2c37a4';
 const IMAGES = 'anitrack-img-v3';
 const MAX_IMAGES = 600; // roughly 30 MB of posters; the oldest are dropped first
 const SHELL = ['./', 'index.html', 'boot.js', 'app.js', 'styles.css', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))));
   self.skipWaiting();
 });
 self.addEventListener('activate', (e) => {
@@ -58,12 +60,16 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache: always ask the server (it answers "not modified" cheaply), so a stale copy in the
+    // browser's own cache can never stand in for a newer release.
+    fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy));
+        }
         return res;
       })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('index.html')))
+      .catch(() => caches.match(e.request).then((r) => r || caches.match(e.request, { ignoreSearch: true })).then((r) => r || caches.match('index.html')))
   );
 });

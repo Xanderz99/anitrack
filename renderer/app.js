@@ -1234,6 +1234,11 @@
   render();
   window.__anitrackBooted = true; // tells boot.js the app started; from here the app reports its own errors
   document.getElementById('boot-error')?.remove(); // a slow start may have shown it; the app is here now
+  try {
+    sessionStorage.removeItem('anitrack:freshReload'); // started fine: a later failure may try a fresh reload again
+  } catch {
+    /* no storage */
+  }
   window.api.init().then((d) => {
     S.data = d;
     render();

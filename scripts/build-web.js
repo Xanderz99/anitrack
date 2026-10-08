@@ -22,7 +22,19 @@ function build() {
   files['app.js'] = js;
   files['styles.css'] = read('renderer/styles.css') + read('web/mobile.css');
   files['boot.js'] = read('renderer/boot.js');
-  for (const f of ['index.html', 'manifest.webmanifest', 'sw.js']) files[f] = fs.readFileSync(path.join(root, 'web', f));
+  for (const f of ['manifest.webmanifest']) files[f] = fs.readFileSync(path.join(root, 'web', f));
+  // Each release references its files by a hash of their contents (app.js?v=…), so a phone can never
+  // mix a cached old file with a new page, and the service worker's cache name changes with them.
+  const hash = (s) => require('crypto').createHash('sha256').update(s).digest('hex').slice(0, 10);
+  const v = {};
+  for (const f of ['boot.js', 'app.js', 'styles.css']) v[f] = hash(files[f]);
+  files['index.html'] = read('web/index.html')
+    .replace('href="styles.css"', `href="styles.css?v=${v['styles.css']}"`)
+    .replace('src="boot.js"', `src="boot.js?v=${v['boot.js']}"`)
+    .replace('src="app.js"', `src="app.js?v=${v['app.js']}"`);
+  for (const f of ['styles.css', 'boot.js', 'app.js']) if (!files['index.html'].includes(`${f}?v=`)) throw new Error(`web/index.html no longer links ${f}`);
+  files['sw.js'] = read('web/sw.js').replace("'anitrack-__BUILD__'", `'anitrack-${hash(Object.values(v).join(''))}'`);
+  if (files['sw.js'].includes("'anitrack-__BUILD__'")) throw new Error('web/sw.js cache name placeholder not found');
   for (const f of fs.readdirSync(path.join(root, 'web', 'icons'))) files[`icons/${f}`] = fs.readFileSync(path.join(root, 'web', 'icons', f));
   files['.nojekyll'] = '';
   return files;
