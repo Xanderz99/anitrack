@@ -2398,6 +2398,19 @@ window.__require = require;
     render();
   });
 
+  document.addEventListener('submit', async (e) => {
+    const addonForm = e.target.closest('[data-form="stremioAddon"]');
+    if (addonForm) {
+      e.preventDefault();
+      try {
+        const addon = await getAddon(addonForm.elements.url.value);
+        saveAddonList([addon, ...addonList().filter((x) => x.id !== addon.id)]);
+        addonForm.reset();
+        toast(addon.name + ' added');
+        render();
+      } catch (err) { toast(err?.message || 'Could not add addon.'); }
+      return;
+    }
     const form = e.target.closest('[data-form="welcomeName"]');
     if (!form) return;
     e.preventDefault();
