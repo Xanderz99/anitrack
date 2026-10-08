@@ -432,14 +432,26 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   const RELATED = { PREQUEL: 'Prequel', SEQUEL: 'Sequel', PARENT: 'Main story', SIDE_STORY: 'Side story', SPIN_OFF: 'Spin-off', ALTERNATIVE: 'Alternative version' };
   const trailerUrl = (t) => (t?.site === 'youtube' && /^[\w-]{6,20}$/.test(t.id) ? `https://www.youtube.com/watch?v=${t.id}` : t?.site === 'dailymotion' && /^\w{4,20}$/.test(t.id) ? `https://www.dailymotion.com/video/${t.id}` : null);
   // Everything about one show. Looks it up on AniList when it is not loaded (an old show on your list).
+  const extras = new Map(); // id -> details-only data (trailer, related titles), fetched once
   async function details(id) {
     id = Number(id);
+    let full = extras.get(id);
+    if (!full) {
+      try {
+        full = await AL.fetchDetails(id);
+        if (full) extras.set(id, full);
+      } catch (e) {
+        if (!findRaw(id)) throw e; // nothing to show at all
+        // Offline or AniList hiccup: show the page from what is loaded, without trailer and titles.
+      }
+    }
     let raw = findRaw(id);
     if (!raw) {
-      [raw] = await AL.fetchByIds([id]);
-      if (!raw) return null;
+      if (!full) return null;
+      raw = full;
       found.set(id, raw);
     }
+    if (full) raw = { ...raw, description: full.description ?? raw.description, trailer: full.trailer, relations: full.relations || raw.relations };
     const order = Object.keys(RELATED);
     const related = (raw.relations?.edges || [])
       .filter((e) => RELATED[e.relationType] && e.node?.type === 'ANIME')

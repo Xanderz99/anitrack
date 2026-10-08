@@ -70,8 +70,7 @@ const MEDIA_FIELDS = `
       coverImage{ large extraLarge color } bannerImage studios(isMain:true){ nodes{ name } }
       startDate{ year month day } nextAiringEpisode{ episode airingAt }
       externalLinks{ site type url }
-      relations{ edges{ relationType node{ id type format title{ romaji english } } } }
-      trailer{ id site }
+      relations{ edges{ relationType node{ id type format } } }
 `;
 
 const SEASON_Q = `query($page:Int,$season:MediaSeason,$year:Int){
@@ -98,6 +97,21 @@ ${MEDIA_FIELDS}
     }
   }
 }`;
+
+// One show with the extras only its details page needs. Kept out of MEDIA_FIELDS: AniList rejects
+// requests above a complexity limit, and a 50-show season page with these nested lists can pass it.
+const DETAILS_Q = `query($id:Int){
+  Media(id:$id, type:ANIME){
+${MEDIA_FIELDS}
+    trailer{ id site }
+    relations{ edges{ relationType node{ id type format title{ romaji english } } } }
+  }
+}`;
+
+async function fetchDetails(id) {
+  const data = await gql(DETAILS_Q, { id: Number(id) });
+  return data.Media;
+}
 
 // Any anime on AniList by title, best matches first.
 async function searchAnime(q) {
@@ -179,4 +193,4 @@ async function saveEntry(token, { mediaId, progress, status, score }) {
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
