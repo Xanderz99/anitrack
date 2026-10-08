@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AniTrack</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="drag"></div>
+    <nav id="nav" aria-label="Views"></nav>
+    <div class="side-foot" id="sidefoot"></div>
+  </aside>
+  <main class="main">
+    <header class="bar" id="bar"></header>
+    <div class="scroll" id="content"></div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

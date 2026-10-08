@@ -1,0 +1,16 @@
+{
+  "name": "anitrack",
+  "productName": "AniTrack",
+  "version": "1.0.0",
+  "description": "Track new anime, rank them by your AniList taste, watch on Crunchyroll and sync progress to AniList.",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/taste.test.js",
+    "app": "bash scripts/build-app.sh"
+  },
+  "devDependencies": {
+    "electron": "github:castlabs/electron-releases#v44.5.1+wvcus"
+  }
+}
