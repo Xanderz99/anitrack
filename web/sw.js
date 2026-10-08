@@ -2,8 +2,8 @@
 // AniList data is never cached here (the app keeps its own copy).
 // Posters and banners from AniList's image server are cache-first: they never change at a given URL,
 // and iOS often empties a Home Screen app's normal browser cache, which made every launch re-download them.
-const CACHE = 'anitrack-v1';
-const IMAGES = 'anitrack-img-v1';
+const CACHE = 'anitrack-v2';
+const IMAGES = 'anitrack-img-v2';
 const MAX_IMAGES = 600; // roughly 30 MB of posters; the oldest are dropped first
 const SHELL = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
