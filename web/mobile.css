@@ -4,6 +4,8 @@
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
 html, body { background: var(--bg); }
 body { -webkit-tap-highlight-color: transparent; }
+/* No double-tap zoom (tapping +1 twice quickly zoomed the page); pinch zoom still works. */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .side { background: #141418; }
 .tabbar { display: none; }
 @media (hover: none) { .card:hover, .poster:hover { transform: none; box-shadow: none; } }
