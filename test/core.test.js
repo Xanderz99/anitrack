@@ -261,3 +261,48 @@ test('calendar file escapes text and folds long lines', () => {
   assert.match(unfolded, /SUMMARY:Long\\, title\\; with \\\\ x+ ★ - Episode 2/);
   assert.match(unfolded, /DTSTART:\d{8}T\d{6}Z/);
 });
+
+test('search finds any anime, and a tracked result joins your shows at once', async () => {
+  const { core, AL } = setup();
+  let asked = 0;
+  AL.searchAnime = async () => {
+    asked += 1;
+    return [media(99, { externalLinks: [{ type: 'STREAMING', site: 'Netflix', url: 'https://www.netflix.com/x' }] })];
+  };
+  await core.refresh({});
+  const r = await core.search('Old Show');
+  assert.deepStrictEqual(r.map((x) => x.id), [99]);
+  assert.strictEqual(r[0].offSeason, true);
+  assert.deepStrictEqual(r[0].streams, [{ site: 'Netflix', url: 'https://www.netflix.com/x' }]);
+  await core.search('old show ');
+  assert.strictEqual(asked, 1, 'the same search is not asked twice');
+  assert.deepStrictEqual(await core.search('x'), [], 'one letter is too short to search');
+
+  await core.setTrack(99, { status: 'PLANNING' });
+  assert.ok(core.basePayload().shows.some((s) => s.id === 99 && s.me.status === 'PLANNING'));
+});
+
+test('streams list Crunchyroll first and each service once', async () => {
+  const links = [
+    { type: 'STREAMING', site: 'Netflix', url: 'https://netflix.com/a' },
+    { type: 'STREAMING', site: 'Crunchyroll', url: 'https://crunchyroll.com/a' },
+    { type: 'STREAMING', site: 'Netflix', url: 'https://netflix.com/b' },
+    { type: 'INFO', site: 'Official Site', url: 'https://example.com' },
+    { type: 'STREAMING', site: 'Sketchy', url: 'http://insecure.example' },
+  ];
+  const { core } = setup({ shows: [media(1, { externalLinks: links })] });
+  await core.refresh({});
+  assert.deepStrictEqual(core.basePayload().shows[0].streams.map((x) => x.site), ['Crunchyroll', 'Netflix']);
+});
+
+test('rating saves to AniList and marks your taste for relearning', async () => {
+  const { core, saved, cache, settings } = setup({ list: [listEntry(1, 'COMPLETED', 12)] });
+  await core.refresh({});
+  assert.deepStrictEqual(await core.rate(1, 8), { ok: true, score: 8 });
+  assert.deepStrictEqual(saved.at(-1), { mediaId: 1, score: 8 });
+  assert.strictEqual(core.S.list.find((e) => e.id === 1).score, 8);
+  assert.strictEqual(cache.get('user').ts, 0);
+  assert.strictEqual((await core.rate(1, 11)).ok, false);
+  settings.patch({ token: '' });
+  assert.match((await core.rate(1, 7)).error, /Log in/);
+});

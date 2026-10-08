@@ -260,6 +260,10 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .sheet-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .sheet .hint { margin: 0; }
 
+.more { margin-top: 28px; }
+.rate { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.rate .btn { height: 46px; font-size: 17px; font-weight: 650; border-radius: 12px; }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }

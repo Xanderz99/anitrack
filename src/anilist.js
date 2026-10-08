@@ -90,6 +90,20 @@ ${MEDIA_FIELDS}
   }
 }`;
 
+const SEARCH_Q = `query($q:String){
+  Page(perPage:20){
+    media(search:$q, type:ANIME, sort:[SEARCH_MATCH, POPULARITY_DESC], isAdult:false){
+${MEDIA_FIELDS}
+    }
+  }
+}`;
+
+// Any anime on AniList by title, best matches first.
+async function searchAnime(q) {
+  const data = await gql(SEARCH_Q, { q: String(q || '').trim() });
+  return data.Page.media;
+}
+
 async function fetchSeason(season, year) {
   const all = [];
   for (let page = 1; page <= 8; page++) {
@@ -140,7 +154,8 @@ async function fetchViewer(token) {
 }
 
 // Only sends the fields it is given, so it never overwrites anything else on the entry.
-async function saveEntry(token, { mediaId, progress, status }) {
+// score is 1-10; scoreRaw (0-100) is used so it lands right whatever scoring system the account uses.
+async function saveEntry(token, { mediaId, progress, status, score }) {
   const vars = { mediaId };
   let defs = '$mediaId:Int';
   let args = 'mediaId:$mediaId';
@@ -154,8 +169,13 @@ async function saveEntry(token, { mediaId, progress, status }) {
     defs += ',$status:MediaListStatus';
     args += ',status:$status';
   }
+  if (score != null) {
+    vars.scoreRaw = Math.round(score * 10);
+    defs += ',$scoreRaw:Int';
+    args += ',scoreRaw:$scoreRaw';
+  }
   const data = await gql(`mutation(${defs}){ SaveMediaListEntry(${args}){ id status progress } }`, vars, token);
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { fetchSeason, fetchByIds, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };

@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('api', {
   init: () => invoke('app:init'),
   refresh: (opts) => invoke('app:refresh', opts),
   setTrack: (id, patch) => invoke('track:set', id, patch),
+  rate: (id, score) => invoke('track:rate', id, score),
+  search: (q) => invoke('anime:search', q),
   saveSettings: (patch) => invoke('settings:save', patch),
   login: () => invoke('anilist:login'),
   logout: () => invoke('anilist:logout'),

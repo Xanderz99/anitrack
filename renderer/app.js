@@ -312,6 +312,7 @@
   function badges(s) {
     const b = [];
     if (s.onCR) b.push('<span class="chip cr">Crunchyroll</span>');
+    for (const x of (s.streams || []).filter((x) => !/crunchyroll/i.test(x.site)).slice(0, 2)) b.push(`<span class="chip">${esc(x.site)}</span>`);
     if (s.dub === 'announced') b.push('<span class="chip dub">English dub</span>');
     else if (s.dub === 'tbd') b.push('<span class="chip">Dub TBD</span>');
     if (s.offSeason) b.push('<span class="chip">Earlier season</span>');
@@ -342,7 +343,8 @@
   function watchLabel(s) {
     const r = s.resume;
     if (r && !r.done && r.time > 30) return `Resume${r.ep ? ` ep ${r.ep}` : ''} · ${clock(r.time)}`;
-    return s.onCR ? 'Watch' : 'Find on Crunchyroll';
+    if (s.onCR) return 'Watch';
+    return s.streams?.length ? `Watch on ${s.streams[0].site}` : 'Find on Crunchyroll';
   }
 
   function card(s) {
@@ -458,7 +460,7 @@
       return;
     }
     if (S.view === 'list') {
-      el.innerHTML = errors() + listHtml();
+      el.innerHTML = errors() + listHtml() + searchMore(new Set(S.data.list.filter((e) => listStatus(e) === S.listTab).map((e) => e.id)));
       el.scrollTop = top;
       return;
     }
@@ -480,9 +482,11 @@
     if (S.view === 'season' || S.view === 'airing') {
       if (S.filters.dub) html += `<p class="note">English dub status comes from Crunchyroll's announcements. A dub often starts days or weeks after the subtitled episode.</p>`;
     }
-    if (!list.length) {
+    if (!list.length && S.filters.q.trim().length >= 2) {
+      html += `<p class="note">Nothing in this view matches "${esc(S.filters.q.trim())}".</p>`;
+    } else if (!list.length) {
       html += `<div class="empty">${
-        S.view === 'mine' ? 'Nothing here yet. Shows you are watching on AniList appear here automatically, and you can add new ones with the status menu on any card.' : 'No shows match these filters.'
+        S.view === 'mine' ? 'Nothing here yet. Shows you are watching on AniList appear here automatically. Search above to find and add any anime.' : 'No shows match these filters.'
       }</div>`;
     } else if (S.view === 'airing') {
       let day = '';
@@ -501,8 +505,39 @@
     } else {
       html += `<div class="grid">${list.map(card).join('')}</div>`;
     }
+    html += searchMore(new Set(list.map((x) => x.id)));
     el.innerHTML = html;
     el.scrollTop = top;
+  }
+
+  /* ---------- search all of AniList ---------- */
+  // The search box filters the current view instantly; after a pause it also asks AniList for any
+  // anime with that title, shown below so you can track shows from other seasons.
+  const searchById = (id) => S.search?.shows?.find((x) => x.id === id);
+  function searchMore(shown) {
+    const q = S.filters.q.trim();
+    if (q.length < 2 || !S.search || S.search.q !== q) return '';
+    if (S.search.loading) return '<section class="more"><h2 class="shelf-t">On AniList</h2><p class="note">Searching AniList…</p></section>';
+    if (S.search.error) return `<section class="more"><h2 class="shelf-t">On AniList</h2><p class="err">Could not search AniList: ${esc(S.search.error)}</p></section>`;
+    const more = S.search.shows.filter((x) => !shown.has(x.id));
+    if (!more.length) return S.search.shows.length ? '' : '<section class="more"><h2 class="shelf-t">On AniList</h2><p class="note">No anime with that title on AniList.</p></section>';
+    return `<section class="more"><h2 class="shelf-t">On AniList</h2><div class="grid">${more.map(card).join('')}</div></section>`;
+  }
+  let searchTimer;
+  function scheduleSearch() {
+    clearTimeout(searchTimer);
+    const q = S.filters.q.trim();
+    if (q.length < 2) {
+      S.search = null;
+      return;
+    }
+    if (S.search?.q !== q) S.search = { q, loading: true, shows: [] };
+    searchTimer = setTimeout(async () => {
+      const r = await window.api.search(q).catch((e) => ({ shows: [], error: e.message }));
+      if (S.filters.q.trim() !== q) return; // typed on meanwhile
+      S.search = { q, shows: r.shows || [], error: r.error || null };
+      renderContent();
+    }, 450);
   }
 
   function syncField(d) {
@@ -540,9 +575,7 @@
     const loginBtn = a.canLogin
       ? '<button class="btn primary small" data-act="login">Log in with AniList</button>'
       : '<span class="hint">Enter a client ID below to log in.</span>';
-    const paste = WEB && a.canLogin
-      ? `<details class="field adv"><summary>Login not coming back?</summary><div class="field"><label for="tokenPaste">Paste a code</label><input type="text" id="tokenPaste" placeholder="Long code from AniList" autocapitalize="off" autocorrect="off"><span class="hint">If logging in opens Safari and never returns to the Home Screen app, use your own client (Advanced) with the redirect URL <b>https://anilist.co/api/v2/oauth/pin</b>, tap Log in, then paste the code AniList shows here.</span></div></details>`
-      : '';
+    const paste = WEB && a.canLogin ? '<div class="field"><label>Have a code?</label><div><button class="btn small" data-act="pasteCode">Paste an AniList code</button></div></div>' : '';
     return `<section class="section">
         <h2>Account</h2>
         <div class="field"><label>AniList</label><div>${loginBtn}</div>
@@ -756,6 +789,28 @@
     sheet.querySelector('[data-sheet="here"]').addEventListener('click', () => submitCode(sheet, token));
   }
 
+  // After the last episode: a quick 1-10 score, saved to AniList (it also sharpens For You).
+  function rateSheet(id, title) {
+    const sheet = openSheet(`<h2>You finished ${esc(title)}</h2><p class="note">How would you rate it?</p>
+      <div class="rate">${Array.from({ length: 10 }, (_, i) => `<button class="btn" data-score="${i + 1}">${i + 1}</button>`).join('')}</div>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><span class="hint">Saved to your AniList score.</span><button class="link" data-sheet-close>Not now</button></div>`);
+    sheet.querySelector('.rate').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-score]');
+      if (!b) return;
+      const r = await window.api.rate(id, Number(b.dataset.score));
+      if (!r.ok) {
+        sheet.querySelector('.sheet-msg').textContent = r.error;
+        return;
+      }
+      closeSheet();
+      const entry = listById(id);
+      if (entry) entry.score = r.score;
+      toast(`Rated ${title} ${r.score}/10`);
+      render();
+    });
+  }
+
   /* ---------- toast ---------- */
   let toastTimer;
   function toast(msg, action) {
@@ -776,13 +831,16 @@
 
   /* ---------- actions ---------- */
   async function applyTrack(id, patch, noUndo) {
-    const s = byId(id);
+    const found = searchById(id);
+    const s = byId(id) || found;
     const l = listById(id);
     if (!s && !l) return;
     const before = { status: (s || l).me.status || null, progress: (s || l).me.progress };
     const r = await window.api.setTrack(id, patch);
-    if (s) s.me = r.me;
-    if (l) l.me = r.me;
+    for (const x of [byId(id), found, l]) if (x) x.me = r.me;
+    // A show added from search: reload so it appears in My Shows and the other views straight away.
+    if (found && !byId(id)) S.data = await window.api.refresh({});
+    if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
     const undo = noUndo ? null : { label: 'Undo', fn: () => applyTrack(id, before, true) };
     if (r.pushed) toast(`AniList updated: ${(s || l).title}`, undo);
     else if (r.error) toast(`Saved here, but AniList said: ${r.error}`);
@@ -890,6 +948,10 @@
       render();
       return;
     }
+    if (act === 'pasteCode') {
+      pasteSheet();
+      return;
+    }
     if (act === 'adoptGuest') {
       adoptGuest();
       return;
@@ -916,7 +978,7 @@
     }
     const cardEl = btn.closest('[data-id]');
     const id = cardEl ? Number(cardEl.dataset.id) : null;
-    const s = id ? byId(id) || listById(id) : null;
+    const s = id ? byId(id) || listById(id) || searchById(id) : null;
     if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watch' && id) {
       const r = await window.api.watch(id);
@@ -953,15 +1015,6 @@
     const patch = {};
     if (t.id === 'userName') patch.userName = t.value;
     else if (t.id === 'clientId') patch.clientId = t.value;
-    else if (t.id === 'tokenPaste' && t.value.trim()) {
-      toast('Checking with AniList…');
-      const r = await window.api.loginWithToken(t.value);
-      S.data = r.data;
-      toast(r.msg);
-      if (r.ok) offerGuest();
-      render();
-      return;
-    }
     else if (t.id === 'notify') patch.notify = t.checked;
     else if (t.id === 'autoMark') patch.autoMarkPct = Number(t.value);
     else return;
@@ -987,6 +1040,7 @@
   document.addEventListener('input', (e) => {
     if (e.target.id === 'q') {
       S.filters.q = e.target.value;
+      scheduleSearch();
       renderNav();
       renderContent();
     }

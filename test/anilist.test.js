@@ -100,3 +100,16 @@ test('fetchUserList reads your own list by id with your token', async (t) => {
   assert.deepStrictEqual(calls[0].body.variables, { id: 5 });
   assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer tok');
 });
+
+test('searchAnime asks for safe-for-work title matches', async (t) => {
+  const calls = mockFetch(t, [{ json: { data: { Page: { media: [{ id: 3 }] } } } }]);
+  assert.deepStrictEqual(await AL.searchAnime('  frieren '), [{ id: 3 }]);
+  assert.deepStrictEqual(calls[0].body.variables, { q: 'frieren' });
+  assert.match(calls[0].body.query, /isAdult:false/);
+});
+
+test('saveEntry sends a 1-10 score as scoreRaw so any scoring system gets it right', async (t) => {
+  const calls = mockFetch(t, [{ json: { data: { SaveMediaListEntry: { id: 1 } } } }]);
+  await AL.saveEntry('tok', { mediaId: 5, score: 8 });
+  assert.deepStrictEqual(calls[0].body.variables, { mediaId: 5, scoreRaw: 80 });
+});

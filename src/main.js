@@ -195,6 +195,11 @@ async function openPlayer(id) {
     core.S.extra.push(raw);
   }
   const show = core.enrich(raw);
+  // Not on Crunchyroll but on another service: that opens in the browser (only Crunchyroll plays in the app).
+  if (!show.crUrl && show.streams[0]) {
+    shell.openExternal(show.streams[0].url);
+    return { ok: true, external: true, drm: true };
+  }
   let url = show.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(show.title)}`;
   const ctx = { showId: id, key: null, marked: false, lastSave: 0, consumed: false, resumeUrl: null, resumeTime: 0 };
   const saved = core.tracking.get('resume')[id];
@@ -409,6 +414,14 @@ function registerIpc() {
   });
   ipcMain.handle('app:refresh', (_e, opts) => refresh(opts || {}));
   ipcMain.handle('track:set', (_e, id, patch) => core.setTrack(Number(id), patch || {}));
+  ipcMain.handle('track:rate', (_e, id, score) => core.rate(id, score));
+  ipcMain.handle('anime:search', async (_e, q) => {
+    try {
+      return { shows: await core.search(String(q || '')) };
+    } catch (e) {
+      return { shows: [], error: e.message };
+    }
+  });
   ipcMain.handle('settings:save', async (_e, patch) => {
     const before = String(settings.get('userName') || '').trim();
     const allowed = {};

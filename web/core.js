@@ -197,6 +197,14 @@
     },
     refresh,
     setTrack: core.setTrack,
+    rate: core.rate,
+    async search(q) {
+      try {
+        return { shows: await core.search(q) };
+      } catch (e) {
+        return { shows: [], error: e.message };
+      }
+    },
     async saveSettings(patch) {
       const before = String(settings.get('userName') || '').trim();
       const allowed = {};
@@ -255,7 +263,7 @@
       const listed = core.S.list.find((e) => e.id === id);
       const show = raw ? core.enrich(raw) : null;
       const title = show ? show.title : listed?.title || '';
-      const url = show?.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(title)}`;
+      const url = show?.crUrl || show?.streams[0]?.url || `https://www.crunchyroll.com/search?q=${encodeURIComponent(title)}`;
       window.open(url, '_blank', 'noopener');
       return { ok: true, external: true, drm: true };
     },

@@ -111,6 +111,20 @@ ${MEDIA_FIELDS}
   }
 }`;
 
+const SEARCH_Q = `query($q:String){
+  Page(perPage:20){
+    media(search:$q, type:ANIME, sort:[SEARCH_MATCH, POPULARITY_DESC], isAdult:false){
+${MEDIA_FIELDS}
+    }
+  }
+}`;
+
+// Any anime on AniList by title, best matches first.
+async function searchAnime(q) {
+  const data = await gql(SEARCH_Q, { q: String(q || '').trim() });
+  return data.Page.media;
+}
+
 async function fetchSeason(season, year) {
   const all = [];
   for (let page = 1; page <= 8; page++) {
@@ -161,7 +175,8 @@ async function fetchViewer(token) {
 }
 
 // Only sends the fields it is given, so it never overwrites anything else on the entry.
-async function saveEntry(token, { mediaId, progress, status }) {
+// score is 1-10; scoreRaw (0-100) is used so it lands right whatever scoring system the account uses.
+async function saveEntry(token, { mediaId, progress, status, score }) {
   const vars = { mediaId };
   let defs = '$mediaId:Int';
   let args = 'mediaId:$mediaId';
@@ -175,11 +190,16 @@ async function saveEntry(token, { mediaId, progress, status }) {
     defs += ',$status:MediaListStatus';
     args += ',status:$status';
   }
+  if (score != null) {
+    vars.scoreRaw = Math.round(score * 10);
+    defs += ',$scoreRaw:Int';
+    args += ',scoreRaw:$scoreRaw';
+  }
   const data = await gql(`mutation(${defs}){ SaveMediaListEntry(${args}){ id status progress } }`, vars, token);
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { fetchSeason, fetchByIds, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
 
   },
   taste: (module, exports, require) => {
@@ -401,7 +421,8 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   // Everything the UI shows is derived from this.
   const S = { raw: [], extra: [], list: [], listMap: {}, taste: null, season: seasonFor(new Date(now())), updatedAt: 0, errors: {} };
   const allRaw = () => [...S.raw, ...S.extra]; // this season plus shows you watch from earlier seasons
-  const findRaw = (id) => allRaw().find((r) => r.id === id);
+  const found = new Map(); // shows seen in search results, so they can be tracked like any other
+  const findRaw = (id) => allRaw().find((r) => r.id === id) || found.get(id);
   const userName = () => String(settings.get('userName') || '').trim();
   const loggedIn = () => !!settings.get('token'); // presence only: the Mac keeps it encrypted
 
@@ -491,7 +512,11 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   }
 
   function enrich(r) {
-    const cr = (r.externalLinks || []).find((l) => l.type === 'STREAMING' && /crunchyroll/i.test(l.site));
+    const streaming = (r.externalLinks || []).filter((l) => l.type === 'STREAMING' && /^https:\/\//.test(l.url || ''));
+    const cr = streaming.find((l) => /crunchyroll/i.test(l.site));
+    // Every legal service AniList lists, Crunchyroll first, one link per service.
+    const streams = [];
+    for (const l of [...(cr ? [cr] : []), ...streaming]) if (!streams.some((x) => x.site === l.site)) streams.push({ site: l.site, url: l.url });
     const prequels = (r.relations?.edges || []).filter((e) => e.relationType === 'PREQUEL' && e.node.type === 'ANIME').map((e) => e.node.id);
     const seenPrequel = prequels.some((id) => ['COMPLETED', 'REPEATING', 'CURRENT'].includes(S.listMap[id]?.status));
     const match = scoreShow(r, S.taste);
@@ -516,6 +541,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       next: r.nextAiringEpisode,
       crUrl: cr?.url || null,
       onCR: !!cr,
+      streams,
       dub: dubMatch(r),
       isSequel: prequels.length > 0,
       needsPrequel: prequels.length > 0 && !!S.taste && !seenPrequel,
@@ -749,6 +775,8 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     if (next.status == null && next.progress == null) delete items[id];
     else items[id] = next;
     tracking.set('items', items);
+    const fromSearch = found.get(id);
+    if (fromSearch && next.status && !allRaw().some((r) => r.id === id)) S.extra.push(fromSearch);
     const push = await pushToAniList(id, patch, next);
     const item = tracking.get('items')[id];
     if (item) {
@@ -757,6 +785,45 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       tracking.set('items', tracking.get('items'));
     }
     return { me: meFor(id), ...push };
+  }
+
+  /* ---------- search all of AniList ---------- */
+  const searches = new Map(); // query -> ids, so retyping does not ask AniList again
+  async function search(q) {
+    const key = String(q || '').trim().toLowerCase();
+    if (key.length < 2) return [];
+    if (!searches.has(key)) {
+      const results = await AL.searchAnime(key);
+      for (const r of results) found.set(r.id, r);
+      searches.set(key, results.map((r) => r.id));
+      if (searches.size > 50) searches.delete(searches.keys().next().value);
+    }
+    return searches.get(key).map((id) => findRaw(id)).filter(Boolean).map((r) => ({ ...enrich(r), me: meFor(r.id), resume: null, offSeason: !S.raw.includes(r) }));
+  }
+
+  /* ---------- rating ---------- */
+  // Saves a 1-10 score to AniList. Ratings drive For You, so the next refresh relearns your taste.
+  async function rate(id, score) {
+    id = Number(id);
+    score = Math.round(Number(score));
+    if (!(score >= 1 && score <= 10)) return { ok: false, error: 'Pick a score from 1 to 10.' };
+    const token = getToken();
+    if (!token) return { ok: false, error: 'Log in with AniList to rate shows.' };
+    try {
+      await AL.saveEntry(token, { mediaId: id, score });
+    } catch (e) {
+      if (isAuthError(e)) {
+        clearToken();
+        return { ok: false, error: LOGIN_EXPIRED };
+      }
+      return { ok: false, error: e.message };
+    }
+    if (S.listMap[id]) S.listMap[id].score = score;
+    const entry = S.list.find((e) => e.id === id);
+    if (entry) entry.score = score;
+    const u = cache.get('user');
+    if (u) cache.set('user', { ...u, ts: 0 }); // stale: relearn taste on the next refresh
+    return { ok: true, score };
   }
 
   /* ---------- upcoming episodes (menu bar, calendar) ---------- */
@@ -769,7 +836,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, search, rate, upcoming, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */
@@ -1024,6 +1091,14 @@ window.__require = require;
     },
     refresh,
     setTrack: core.setTrack,
+    rate: core.rate,
+    async search(q) {
+      try {
+        return { shows: await core.search(q) };
+      } catch (e) {
+        return { shows: [], error: e.message };
+      }
+    },
     async saveSettings(patch) {
       const before = String(settings.get('userName') || '').trim();
       const allowed = {};
@@ -1082,7 +1157,7 @@ window.__require = require;
       const listed = core.S.list.find((e) => e.id === id);
       const show = raw ? core.enrich(raw) : null;
       const title = show ? show.title : listed?.title || '';
-      const url = show?.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(title)}`;
+      const url = show?.crUrl || show?.streams[0]?.url || `https://www.crunchyroll.com/search?q=${encodeURIComponent(title)}`;
       window.open(url, '_blank', 'noopener');
       return { ok: true, external: true, drm: true };
     },
@@ -1427,6 +1502,7 @@ window.__require = require;
   function badges(s) {
     const b = [];
     if (s.onCR) b.push('<span class="chip cr">Crunchyroll</span>');
+    for (const x of (s.streams || []).filter((x) => !/crunchyroll/i.test(x.site)).slice(0, 2)) b.push(`<span class="chip">${esc(x.site)}</span>`);
     if (s.dub === 'announced') b.push('<span class="chip dub">English dub</span>');
     else if (s.dub === 'tbd') b.push('<span class="chip">Dub TBD</span>');
     if (s.offSeason) b.push('<span class="chip">Earlier season</span>');
@@ -1457,7 +1533,8 @@ window.__require = require;
   function watchLabel(s) {
     const r = s.resume;
     if (r && !r.done && r.time > 30) return `Resume${r.ep ? ` ep ${r.ep}` : ''} · ${clock(r.time)}`;
-    return s.onCR ? 'Watch' : 'Find on Crunchyroll';
+    if (s.onCR) return 'Watch';
+    return s.streams?.length ? `Watch on ${s.streams[0].site}` : 'Find on Crunchyroll';
   }
 
   function card(s) {
@@ -1573,7 +1650,7 @@ window.__require = require;
       return;
     }
     if (S.view === 'list') {
-      el.innerHTML = errors() + listHtml();
+      el.innerHTML = errors() + listHtml() + searchMore(new Set(S.data.list.filter((e) => listStatus(e) === S.listTab).map((e) => e.id)));
       el.scrollTop = top;
       return;
     }
@@ -1595,9 +1672,11 @@ window.__require = require;
     if (S.view === 'season' || S.view === 'airing') {
       if (S.filters.dub) html += `<p class="note">English dub status comes from Crunchyroll's announcements. A dub often starts days or weeks after the subtitled episode.</p>`;
     }
-    if (!list.length) {
+    if (!list.length && S.filters.q.trim().length >= 2) {
+      html += `<p class="note">Nothing in this view matches "${esc(S.filters.q.trim())}".</p>`;
+    } else if (!list.length) {
       html += `<div class="empty">${
-        S.view === 'mine' ? 'Nothing here yet. Shows you are watching on AniList appear here automatically, and you can add new ones with the status menu on any card.' : 'No shows match these filters.'
+        S.view === 'mine' ? 'Nothing here yet. Shows you are watching on AniList appear here automatically. Search above to find and add any anime.' : 'No shows match these filters.'
       }</div>`;
     } else if (S.view === 'airing') {
       let day = '';
@@ -1616,8 +1695,39 @@ window.__require = require;
     } else {
       html += `<div class="grid">${list.map(card).join('')}</div>`;
     }
+    html += searchMore(new Set(list.map((x) => x.id)));
     el.innerHTML = html;
     el.scrollTop = top;
+  }
+
+  /* ---------- search all of AniList ---------- */
+  // The search box filters the current view instantly; after a pause it also asks AniList for any
+  // anime with that title, shown below so you can track shows from other seasons.
+  const searchById = (id) => S.search?.shows?.find((x) => x.id === id);
+  function searchMore(shown) {
+    const q = S.filters.q.trim();
+    if (q.length < 2 || !S.search || S.search.q !== q) return '';
+    if (S.search.loading) return '<section class="more"><h2 class="shelf-t">On AniList</h2><p class="note">Searching AniList…</p></section>';
+    if (S.search.error) return `<section class="more"><h2 class="shelf-t">On AniList</h2><p class="err">Could not search AniList: ${esc(S.search.error)}</p></section>`;
+    const more = S.search.shows.filter((x) => !shown.has(x.id));
+    if (!more.length) return S.search.shows.length ? '' : '<section class="more"><h2 class="shelf-t">On AniList</h2><p class="note">No anime with that title on AniList.</p></section>';
+    return `<section class="more"><h2 class="shelf-t">On AniList</h2><div class="grid">${more.map(card).join('')}</div></section>`;
+  }
+  let searchTimer;
+  function scheduleSearch() {
+    clearTimeout(searchTimer);
+    const q = S.filters.q.trim();
+    if (q.length < 2) {
+      S.search = null;
+      return;
+    }
+    if (S.search?.q !== q) S.search = { q, loading: true, shows: [] };
+    searchTimer = setTimeout(async () => {
+      const r = await window.api.search(q).catch((e) => ({ shows: [], error: e.message }));
+      if (S.filters.q.trim() !== q) return; // typed on meanwhile
+      S.search = { q, shows: r.shows || [], error: r.error || null };
+      renderContent();
+    }, 450);
   }
 
   function syncField(d) {
@@ -1655,9 +1765,7 @@ window.__require = require;
     const loginBtn = a.canLogin
       ? '<button class="btn primary small" data-act="login">Log in with AniList</button>'
       : '<span class="hint">Enter a client ID below to log in.</span>';
-    const paste = WEB && a.canLogin
-      ? `<details class="field adv"><summary>Login not coming back?</summary><div class="field"><label for="tokenPaste">Paste a code</label><input type="text" id="tokenPaste" placeholder="Long code from AniList" autocapitalize="off" autocorrect="off"><span class="hint">If logging in opens Safari and never returns to the Home Screen app, use your own client (Advanced) with the redirect URL <b>https://anilist.co/api/v2/oauth/pin</b>, tap Log in, then paste the code AniList shows here.</span></div></details>`
-      : '';
+    const paste = WEB && a.canLogin ? '<div class="field"><label>Have a code?</label><div><button class="btn small" data-act="pasteCode">Paste an AniList code</button></div></div>' : '';
     return `<section class="section">
         <h2>Account</h2>
         <div class="field"><label>AniList</label><div>${loginBtn}</div>
@@ -1871,6 +1979,28 @@ window.__require = require;
     sheet.querySelector('[data-sheet="here"]').addEventListener('click', () => submitCode(sheet, token));
   }
 
+  // After the last episode: a quick 1-10 score, saved to AniList (it also sharpens For You).
+  function rateSheet(id, title) {
+    const sheet = openSheet(`<h2>You finished ${esc(title)}</h2><p class="note">How would you rate it?</p>
+      <div class="rate">${Array.from({ length: 10 }, (_, i) => `<button class="btn" data-score="${i + 1}">${i + 1}</button>`).join('')}</div>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><span class="hint">Saved to your AniList score.</span><button class="link" data-sheet-close>Not now</button></div>`);
+    sheet.querySelector('.rate').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-score]');
+      if (!b) return;
+      const r = await window.api.rate(id, Number(b.dataset.score));
+      if (!r.ok) {
+        sheet.querySelector('.sheet-msg').textContent = r.error;
+        return;
+      }
+      closeSheet();
+      const entry = listById(id);
+      if (entry) entry.score = r.score;
+      toast(`Rated ${title} ${r.score}/10`);
+      render();
+    });
+  }
+
   /* ---------- toast ---------- */
   let toastTimer;
   function toast(msg, action) {
@@ -1891,13 +2021,16 @@ window.__require = require;
 
   /* ---------- actions ---------- */
   async function applyTrack(id, patch, noUndo) {
-    const s = byId(id);
+    const found = searchById(id);
+    const s = byId(id) || found;
     const l = listById(id);
     if (!s && !l) return;
     const before = { status: (s || l).me.status || null, progress: (s || l).me.progress };
     const r = await window.api.setTrack(id, patch);
-    if (s) s.me = r.me;
-    if (l) l.me = r.me;
+    for (const x of [byId(id), found, l]) if (x) x.me = r.me;
+    // A show added from search: reload so it appears in My Shows and the other views straight away.
+    if (found && !byId(id)) S.data = await window.api.refresh({});
+    if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
     const undo = noUndo ? null : { label: 'Undo', fn: () => applyTrack(id, before, true) };
     if (r.pushed) toast(`AniList updated: ${(s || l).title}`, undo);
     else if (r.error) toast(`Saved here, but AniList said: ${r.error}`);
@@ -2005,6 +2138,10 @@ window.__require = require;
       render();
       return;
     }
+    if (act === 'pasteCode') {
+      pasteSheet();
+      return;
+    }
     if (act === 'adoptGuest') {
       adoptGuest();
       return;
@@ -2031,7 +2168,7 @@ window.__require = require;
     }
     const cardEl = btn.closest('[data-id]');
     const id = cardEl ? Number(cardEl.dataset.id) : null;
-    const s = id ? byId(id) || listById(id) : null;
+    const s = id ? byId(id) || listById(id) || searchById(id) : null;
     if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watch' && id) {
       const r = await window.api.watch(id);
@@ -2068,15 +2205,6 @@ window.__require = require;
     const patch = {};
     if (t.id === 'userName') patch.userName = t.value;
     else if (t.id === 'clientId') patch.clientId = t.value;
-    else if (t.id === 'tokenPaste' && t.value.trim()) {
-      toast('Checking with AniList…');
-      const r = await window.api.loginWithToken(t.value);
-      S.data = r.data;
-      toast(r.msg);
-      if (r.ok) offerGuest();
-      render();
-      return;
-    }
     else if (t.id === 'notify') patch.notify = t.checked;
     else if (t.id === 'autoMark') patch.autoMarkPct = Number(t.value);
     else return;
@@ -2102,6 +2230,7 @@ window.__require = require;
   document.addEventListener('input', (e) => {
     if (e.target.id === 'q') {
       S.filters.q = e.target.value;
+      scheduleSearch();
       renderNav();
       renderContent();
     }

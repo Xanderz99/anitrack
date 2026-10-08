@@ -48,7 +48,8 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   // Everything the UI shows is derived from this.
   const S = { raw: [], extra: [], list: [], listMap: {}, taste: null, season: seasonFor(new Date(now())), updatedAt: 0, errors: {} };
   const allRaw = () => [...S.raw, ...S.extra]; // this season plus shows you watch from earlier seasons
-  const findRaw = (id) => allRaw().find((r) => r.id === id);
+  const found = new Map(); // shows seen in search results, so they can be tracked like any other
+  const findRaw = (id) => allRaw().find((r) => r.id === id) || found.get(id);
   const userName = () => String(settings.get('userName') || '').trim();
   const loggedIn = () => !!settings.get('token'); // presence only: the Mac keeps it encrypted
 
@@ -138,7 +139,11 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   }
 
   function enrich(r) {
-    const cr = (r.externalLinks || []).find((l) => l.type === 'STREAMING' && /crunchyroll/i.test(l.site));
+    const streaming = (r.externalLinks || []).filter((l) => l.type === 'STREAMING' && /^https:\/\//.test(l.url || ''));
+    const cr = streaming.find((l) => /crunchyroll/i.test(l.site));
+    // Every legal service AniList lists, Crunchyroll first, one link per service.
+    const streams = [];
+    for (const l of [...(cr ? [cr] : []), ...streaming]) if (!streams.some((x) => x.site === l.site)) streams.push({ site: l.site, url: l.url });
     const prequels = (r.relations?.edges || []).filter((e) => e.relationType === 'PREQUEL' && e.node.type === 'ANIME').map((e) => e.node.id);
     const seenPrequel = prequels.some((id) => ['COMPLETED', 'REPEATING', 'CURRENT'].includes(S.listMap[id]?.status));
     const match = scoreShow(r, S.taste);
@@ -163,6 +168,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       next: r.nextAiringEpisode,
       crUrl: cr?.url || null,
       onCR: !!cr,
+      streams,
       dub: dubMatch(r),
       isSequel: prequels.length > 0,
       needsPrequel: prequels.length > 0 && !!S.taste && !seenPrequel,
@@ -396,6 +402,8 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     if (next.status == null && next.progress == null) delete items[id];
     else items[id] = next;
     tracking.set('items', items);
+    const fromSearch = found.get(id);
+    if (fromSearch && next.status && !allRaw().some((r) => r.id === id)) S.extra.push(fromSearch);
     const push = await pushToAniList(id, patch, next);
     const item = tracking.get('items')[id];
     if (item) {
@@ -404,6 +412,45 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       tracking.set('items', tracking.get('items'));
     }
     return { me: meFor(id), ...push };
+  }
+
+  /* ---------- search all of AniList ---------- */
+  const searches = new Map(); // query -> ids, so retyping does not ask AniList again
+  async function search(q) {
+    const key = String(q || '').trim().toLowerCase();
+    if (key.length < 2) return [];
+    if (!searches.has(key)) {
+      const results = await AL.searchAnime(key);
+      for (const r of results) found.set(r.id, r);
+      searches.set(key, results.map((r) => r.id));
+      if (searches.size > 50) searches.delete(searches.keys().next().value);
+    }
+    return searches.get(key).map((id) => findRaw(id)).filter(Boolean).map((r) => ({ ...enrich(r), me: meFor(r.id), resume: null, offSeason: !S.raw.includes(r) }));
+  }
+
+  /* ---------- rating ---------- */
+  // Saves a 1-10 score to AniList. Ratings drive For You, so the next refresh relearns your taste.
+  async function rate(id, score) {
+    id = Number(id);
+    score = Math.round(Number(score));
+    if (!(score >= 1 && score <= 10)) return { ok: false, error: 'Pick a score from 1 to 10.' };
+    const token = getToken();
+    if (!token) return { ok: false, error: 'Log in with AniList to rate shows.' };
+    try {
+      await AL.saveEntry(token, { mediaId: id, score });
+    } catch (e) {
+      if (isAuthError(e)) {
+        clearToken();
+        return { ok: false, error: LOGIN_EXPIRED };
+      }
+      return { ok: false, error: e.message };
+    }
+    if (S.listMap[id]) S.listMap[id].score = score;
+    const entry = S.list.find((e) => e.id === id);
+    if (entry) entry.score = score;
+    const u = cache.get('user');
+    if (u) cache.set('user', { ...u, ts: 0 }); // stale: relearn taste on the next refresh
+    return { ok: true, score };
   }
 
   /* ---------- upcoming episodes (menu bar, calendar) ---------- */
@@ -416,7 +463,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, search, rate, upcoming, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */
