@@ -38,6 +38,11 @@
     { id: 'list', label: 'My List', group: 'Library', ico: svg('<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>') },
     { id: 'settings', label: 'Settings', group: 'Library', ico: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>') },
   ];
+  const ICON = {
+    check: svg('<path d="M5 12.5 10 17l9-10"/>'),
+    plus: svg('<path d="M12 5v14M5 12h14"/>'),
+    info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>'),
+  };
   const SORTS = { popular: 'Popular', match: 'Best match', score: 'Rating', airing: 'Airing soon', az: 'A–Z' };
   const TIMES = [
     { id: 30, label: 'Quick', sub: '1 episode' },
@@ -122,18 +127,18 @@
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-  function tile(s, sub) {
+  function tile(s, sub, badge) {
     const me = s.me;
     const pct = me.status && s.episodes ? Math.min(100, Math.round((me.progress / s.episodes) * 100)) : 0;
     return `<article class="tile" data-id="${s.id}" style="${s.color ? `--tint:${esc(s.color)}` : ''}">
       <button class="poster" data-act="watch" aria-label="Watch ${esc(s.title)}">${s.cover ? `<img src="${esc(s.cover)}" alt="" loading="lazy">` : ''}
-        ${s.dub === 'announced' ? '<span class="badge">DUB</span>' : ''}${s.match != null && !me.status ? `<span class="badge m">${s.match}%</span>` : ''}
+        ${s.dub === 'announced' ? '<span class="badge">DUB</span>' : ''}${s.match != null && !me.status ? `<span class="badge m">${s.match}%</span>` : ''}${badge ? `<span class="badge new">${esc(badge)}</span>` : ''}
         ${pct ? `<span class="track"><i style="width:${pct}%"></i></span>` : ''}</button>
       <div class="tt" title="${esc(s.title)}">${esc(s.title)}</div><div class="ts">${esc(sub)}</div></article>`;
   }
-  function shelf(title, items, subFn) {
+  function shelf(title, items, subFn, badgeFn = () => '') {
     if (!items.length) return '';
-    return `<section class="shelf"><h2 class="shelf-t">${title}</h2><div class="shelf-row">${items.map((s) => tile(s, subFn(s))).join('')}</div></section>`;
+    return `<section class="shelf"><h2 class="shelf-t">${title}</h2><div class="shelf-row">${items.map((s) => tile(s, subFn(s), badgeFn(s))).join('')}</div></section>`;
   }
   function homeHtml() {
     const shows = S.data.shows;
@@ -144,23 +149,35 @@
     const hero = upNext[0] || foryou[0] || shows.find((s) => s.onCR);
     let html = '';
     if (hero) {
-      const kind = upNext[0] ? (hero.resume && !hero.resume.done && hero.resume.time > 30 ? 'Continue Watching' : 'Up Next') : 'Featured for you';
+      const up = hero === upNext[0];
+      const resuming = hero.resume && !hero.resume.done && hero.resume.time > 30;
+      const waiting = up ? aired(hero) - hero.me.progress : 0;
+      const kind = up ? (resuming ? 'Continue Watching' : 'Up Next') : 'Featured for you';
       const bits = [hero.genres.slice(0, 3).join(' · '), hero.episodes ? `${hero.episodes} episodes` : '', hero.dub === 'announced' ? 'English dub' : ''].filter(Boolean);
-      const blurb = upNext[0] ? `Episode ${hero.me.progress + 1} is ready${aired(hero) - hero.me.progress > 1 ? `, ${aired(hero) - hero.me.progress} waiting` : ''}.` : hero.why && hero.why.length ? `Because you like ${hero.why.join(', ')}.` : '';
-      html += `<section class="hero" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
-        <div class="hero-bg" style="background-image:url('${cssUrl(hero.cover)}')"></div>
-        <div class="hero-in"><div class="eyebrow">${kind}${hero.match != null && !upNext[0] ? ` · ${hero.match}% match` : ''}</div>
-          <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div><div class="hero-d">${esc(blurb)}</div>
-          <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(watchLabel(hero))}</button>
-          ${hero.me.status ? '' : '<button class="btn big" data-act="plan">+ Plan to watch</button>'}</div></div>
-        ${hero.cover ? `<img class="hero-p" src="${esc(hero.cover)}" alt="">` : ''}</section>`;
+      const blurb = up ? (waiting > 1 ? `${waiting} episodes ready to watch.` : 'The next episode is ready.') : hero.why && hero.why.length ? `Because you like ${hero.why.join(', ')}.` : '';
+      const play = up && !resuming ? `Episode ${hero.me.progress + 1}` : watchLabel(hero);
+      const pct = up && hero.episodes ? Math.min(100, Math.round((hero.me.progress / hero.episodes) * 100)) : 0;
+      const prog = up ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${hero.me.progress}${hero.episodes ? ` of ${hero.episodes}` : ''} watched</span></div>` : '';
+      const second = up
+        ? `<button class="btn big icon" data-act="inc" aria-label="Mark episode ${hero.me.progress + 1} watched" title="Mark episode ${hero.me.progress + 1} watched">${ICON.check}</button>`
+        : hero.me.status
+          ? ''
+          : `<button class="btn big icon" data-act="plan" aria-label="Plan to watch" title="Plan to watch">${ICON.plus}</button>`;
+      const info = hero.siteUrl ? `<button class="btn big icon" data-act="ext" data-url="${esc(hero.siteUrl)}" aria-label="Open on AniList" title="Open on AniList">${ICON.info}</button>` : '';
+      const art = hero.coverXL || hero.cover;
+      html += `<section class="hero ${hero.banner ? 'has-banner' : ''}" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
+        <div class="hero-bg" style="background-image:url('${cssUrl(hero.banner || art)}')"></div>
+        ${art ? `<img class="hero-art" src="${esc(art)}" alt="">` : ''}
+        <div class="hero-in"><div class="eyebrow">${kind}${hero.match != null && !up ? ` · ${hero.match}% match` : ''}</div>
+          <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div>${prog}<div class="hero-d">${esc(blurb)}</div>
+          <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(play)}</button>${second}${info}</div></div></section>`;
     }
     const wk = Date.now() / 1000 + 7 * 86400;
     const airing = shows.filter((s) => s.next && s.next.airingAt < wk && ['WATCHING', 'PLANNING'].includes(s.me.status)).sort((a, b) => a.next.airingAt - b.next.airingAt);
     const fresh = shows.filter((s) => isNew(s) && s.onCR && !s.me.status);
     const planning = shows.filter((s) => s.me.status === 'PLANNING');
     const epSub = (s) => (s.resume && !s.resume.done && s.resume.time > 30 ? `Ep ${s.resume.ep || s.me.progress + 1} · ${clock(s.resume.time)} in` : `Episode ${s.me.progress + 1}`);
-    html += shelf('Up Next', upNext, epSub);
+    html += shelf('Up Next', upNext, epSub, (s) => (aired(s) - s.me.progress > 1 ? `${aired(s) - s.me.progress} new` : ''));
     html += shelf('Airing This Week', airing, (s) => `Ep ${s.next.episode} · ${rel(s.next.airingAt)}`);
     html += shelf('Top Picks for You', foryou.slice(0, 16), (s) => (s.why && s.why.length ? s.why.slice(0, 2).join(', ') : s.genres.slice(0, 2).join(', ')));
     html += shelf('New This Week', fresh, (s) => isNew(s));
@@ -260,23 +277,25 @@
     const f = S.filters;
     const pill = (key, label) => `<button class="pill ${f[key] ? 'on' : ''}" data-filter="${key}" aria-pressed="${!!f[key]}">${label}</button>`;
     let html = `<h1>${v.label}</h1>`;
-    if (['foryou', 'season', 'airing'].includes(S.view)) html += pill('cr', 'Crunchyroll') + pill('dub', 'English dub');
-    if (S.view === 'foryou') html += pill('hideSeq', 'Hide unseen sequels');
-    if (['foryou', 'season', 'airing'].includes(S.view) && S.data) html += genreSelect();
-    if (S.view === 'season') html += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
-    if (S.view === 'airing' || S.view === 'mine') html += '<button class="btn small" data-act="exportCal" title="Save upcoming episodes as a calendar file">Export calendar</button>';
+    let ctl = ''; // filters, sorting and tabs: one row that swipes sideways on a phone
+    if (['foryou', 'season', 'airing'].includes(S.view)) ctl += pill('cr', 'Crunchyroll') + pill('dub', 'English dub');
+    if (S.view === 'foryou') ctl += pill('hideSeq', 'Hide unseen sequels');
+    if (['foryou', 'season', 'airing'].includes(S.view) && S.data) ctl += genreSelect();
+    if (S.view === 'season') ctl += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
+    if (S.view === 'airing' || S.view === 'mine') ctl += '<button class="btn small" data-act="exportCal" title="Save upcoming episodes as a calendar file">Export calendar</button>';
     if (S.view === 'list' && S.data) {
       const counts = {};
       for (const e of S.data.list) counts[listStatus(e)] = (counts[listStatus(e)] || 0) + 1;
-      html += LIST_TABS.map(
+      ctl += LIST_TABS.map(
         (t) => `<button class="pill ${S.listTab === t ? 'on' : ''}" data-listtab="${t}" aria-pressed="${S.listTab === t}">${STATUS_LABEL[t]} ${counts[t] || 0}</button>`
       ).join('');
     }
-    if (WEB && S.view === 'foryou') html += '<button class="pill narrow-only" data-nav="season">Whole season</button>';
+    if (WEB && S.view === 'foryou') ctl += '<button class="pill narrow-only" data-nav="season">Whole season</button>';
     if (WEB && S.view === 'season' && S.data) {
       const d = S.data.season;
-      html += `<span class="narrow-only pager"><button class="btn small" data-season="-1" aria-label="Previous season">‹</button>${d.season[0]}${d.season.slice(1).toLowerCase()} ${d.year}<button class="btn small" data-season="1" aria-label="Next season">›</button></span>`;
+      ctl += `<span class="narrow-only pager"><button class="btn small" data-season="-1" aria-label="Previous season">‹</button>${d.season[0]}${d.season.slice(1).toLowerCase()} ${d.year}<button class="btn small" data-season="1" aria-label="Next season">›</button></span>`;
     }
+    if (ctl) html += `<div class="filters">${ctl}</div>`;
     html += '<span class="spacer"></span>';
     if (WEB && S.view !== 'settings') html += `<button class="btn small narrow-only gear" data-nav="settings" aria-label="Settings">${VIEWS.find((v) => v.id === 'settings').ico}</button>`;
     if (!['settings', 'tonight', 'home'].includes(S.view)) html += `<input type="search" id="q" placeholder="Search" value="${esc(f.q)}" aria-label="Search shows">`;
@@ -347,25 +366,23 @@
         <div class="head">
           <div class="title">${esc(s.title)}</div>
           ${s.match != null ? `<span class="score ${s.match < 45 ? 'low' : ''}" title="How well this fits your AniList ratings">${s.match}%</span>` : ''}
+          ${s.siteUrl ? `<button class="link ext" data-act="ext" data-url="${esc(s.siteUrl)}" aria-label="Open ${esc(s.title)} on AniList" title="Open on AniList">${ICON.info}</button>` : ''}
         </div>
         <div class="meta">${esc([s.genres.slice(0, 3).join(', '), s.episodes ? `${s.episodes} eps` : 'ongoing', s.studio].filter(Boolean).join(' · '))}</div>
         ${matchLine}
-        <div class="chips">${isNew(s) ? `<span class="chip hot">${isNew(s)}</span>` : ''}${badges(s)}</div>
+        <div class="chips">${behind ? `<span class="chip hot">${behind} behind</span>` : ''}${isNew(s) ? `<span class="chip hot">${isNew(s)}</span>` : ''}${badges(s)}</div>
         ${nextLine(s)}
         ${pct ? `<div class="track" title="${me.progress} of ${s.episodes} watched"><i style="width:${pct}%"></i></div>` : ''}
+      </div>
         <div class="acts">
           <button class="btn primary small" data-act="watch">${watchLabel(s)}</button>
-          ${s.siteUrl ? `<button class="link" data-act="ext" data-url="${esc(s.siteUrl)}">AniList</button>` : ''}
           <select data-act="status" aria-label="Status for ${esc(s.title)}">${opts}${status}</select>
           ${
             me.status === 'WATCHING'
-              ? `<span class="prog"><button class="btn small" data-act="dec" aria-label="One episode back">−</button>Ep ${me.progress}${total}<button class="btn small" data-act="inc">+1</button></span>${
-                  behind ? `<span class="behind">${behind} behind</span>` : ''
-                }`
+              ? `<span class="prog"><button class="btn small" data-act="dec" aria-label="One episode back">−</button>Ep ${me.progress}${total}<button class="btn small" data-act="inc">+1</button></span>`
               : ''
           }
         </div>
-      </div>
     </article>`;
   }
 
@@ -374,7 +391,8 @@
     if (!t) {
       return `<p class="note">Ranking is by popularity for now. Log in with AniList in <b>Settings</b> (or enter a public username) and shows will be ranked by how well they match what you rate highly.</p>`;
     }
-    return `<p class="note">Ranked against your AniList ratings. You tend to like <b>${esc(t.likes.join(', ') || '…')}</b>${
+    if (!t.likes.length) return '<p class="note">Ranked against your AniList ratings. Rate a few more shows on AniList and the picks get sharper. Shows already on your list live under My Shows.</p>';
+    return `<p class="note">Ranked against your AniList ratings. You tend to like <b>${esc(t.likes.join(', '))}</b>${
       t.tagLikes.length ? ` (especially ${esc(t.tagLikes.join(', '))})` : ''
     }${t.skips.length ? `, and tend to skip <b>${esc(t.skips.join(', '))}</b>` : ''}. Shows already on your list live under My Shows.</p>`;
   }
@@ -423,7 +441,12 @@
       return;
     }
     if (!S.data || (S.data.loading && S.view !== 'settings')) {
-      el.innerHTML = '<div class="empty">Loading this season from AniList…</div>';
+      // Placeholder shapes while the first load runs, so the layout does not jump when data arrives.
+      el.innerHTML = `<div class="skel" aria-label="Loading" role="status">${
+        S.view === 'home'
+          ? `<div class="sk sk-hero"></div><div class="sk sk-t"></div><div class="sk-row">${'<div class="sk sk-tile"></div>'.repeat(5)}</div>`
+          : '<div class="sk sk-card"></div>'.repeat(4)
+      }</div>`;
       return;
     }
     if (S.data.firstRun && S.view !== 'settings') {
@@ -591,6 +614,7 @@
   }
 
   function render() {
+    document.querySelector('.main').dataset.view = S.player ? 'player' : S.data?.firstRun && S.view !== 'settings' ? 'welcome' : S.view;
     renderNav();
     renderBar();
     renderContent();
@@ -622,6 +646,31 @@
     const n = S.data?.guestItems;
     if (n) setTimeout(() => toast(`You tracked ${n} show${n > 1 ? 's' : ''} on this device before logging in. Add ${n > 1 ? 'them' : 'it'} to your AniList?`, { label: 'Add', fn: adoptGuest }), 1500);
   }
+
+  // Switches view. A new view opens at the top; tapping the view you are on scrolls it back up.
+  function go(view) {
+    const same = S.view === view;
+    S.view = view;
+    store.set('view', S.view);
+    render();
+    if (same) {
+      $('#content').scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      $('#content').scrollTop = 0;
+      window.scrollTo(0, 0);
+    }
+    onScroll();
+  }
+
+  // Phones scroll the page, the Mac scrolls #content. Past the hero (or the top), the header turns solid.
+  function onScroll() {
+    const top = Math.max($('#content').scrollTop, window.scrollY);
+    const hero = $('#content .hero');
+    document.documentElement.classList.toggle('scrolled', top > (hero ? hero.offsetHeight - 90 : 8));
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  $('#content').addEventListener('scroll', onScroll, { passive: true });
 
   /* ---------- toast ---------- */
   let toastTimer;
@@ -665,9 +714,7 @@
     const nav = e.target.closest('[data-nav]');
     if (nav) {
       if (S.player) await window.api.closePlayer();
-      S.view = nav.dataset.nav;
-      store.set('view', S.view);
-      render();
+      go(nav.dataset.nav);
       return;
     }
     const tm = e.target.closest('[data-tmins]');
@@ -863,9 +910,7 @@
       const v = VIEWS[Number(e.key) - 1];
       if (v) {
         if (S.player) await window.api.closePlayer();
-        S.view = v.id;
-        store.set('view', S.view);
-        render();
+        go(v.id);
       }
     } else if (((e.metaKey || e.ctrlKey) && e.key === 'f') || (e.key === '/' && !typing)) {
       const q = $('#q');

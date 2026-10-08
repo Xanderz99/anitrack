@@ -67,7 +67,7 @@ async function gql(query, variables = {}, token) {
 const MEDIA_FIELDS = `
       id siteUrl title{ romaji english } format episodes duration genres
       tags{ name rank } averageScore popularity status description(asHtml:false)
-      coverImage{ large color } studios(isMain:true){ nodes{ name } }
+      coverImage{ large extraLarge color } bannerImage studios(isMain:true){ nodes{ name } }
       startDate{ year month day } nextAiringEpisode{ episode airingAt }
       externalLinks{ site type url }
       relations{ edges{ relationType node{ id type format } } }

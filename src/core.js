@@ -156,6 +156,8 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       airStatus: r.status,
       color: r.coverImage?.color || null,
       cover: r.coverImage?.large || null,
+      coverXL: r.coverImage?.extraLarge || r.coverImage?.large || null, // sharper art for big heroes
+      banner: r.bannerImage || null,
       studio: r.studios?.nodes?.[0]?.name?.trim() || '',
       start: r.startDate,
       next: r.nextAiringEpisode,
