@@ -1254,6 +1254,13 @@ window.__require = require;
 })(window.__require);
 'use strict';
 (() => {
+  const showBootError = (message) => {
+    try {
+      document.body.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#0b0b0e;color:#fff;font:16px system-ui,sans-serif"><section style="max-width:560px"><h1 style="margin:0 0 12px">AniTrack could not start</h1><p style="margin:0 0 16px;opacity:.8">The app hit an error while loading. Please reload once. If it keeps happening, the error below identifies the broken part.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:#17171c;padding:14px;border-radius:10px">' + String(message || 'Unknown error').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre></section></main>';
+    } catch {}
+  };
+  window.addEventListener('error', (e) => showBootError(e.error?.stack || e.message || 'JavaScript error'), true);
+  window.addEventListener('unhandledrejection', (e) => showBootError(e.reason?.stack || e.reason?.message || String(e.reason || 'Unhandled promise rejection')), true);
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // UI preferences. Keys share the anitrack: prefix so "Remove all AniTrack data" clears them too;
