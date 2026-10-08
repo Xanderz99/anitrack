@@ -1101,6 +1101,13 @@ window.__require = require;
 
   window.api = api;
 
+  // No pinch zoom: it behaves like a native app. Safari ignores user-scalable=no, so the gesture
+  // itself is cancelled (gesture* events are Safari's pinch; two-finger touchmove covers the rest).
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+  }, { passive: false });
+
   // Hourly refresh while the app stays open.
   setInterval(() => refresh({}).then((p) => emit('data', p)).catch(() => {}), 3600e3);
 })();
