@@ -1851,8 +1851,8 @@ window.__require = require;
   function torboxSection() {
     return `<section class="section">
         <h2>TorBox / Stremio</h2>
-        <p class="note">Use TorBox through its official Stremio integration. AniTrack keeps the account and playback inside Stremio rather than handling torrent sources itself.</p>
-        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torbox">Set up TorBox in Stremio ↗</button></div><span class="hint">Open TorBox's current Stremio integration settings. TorBox currently has its hosted Stremio addon disabled, so this page is the correct place to check the current integration status.</span></div>
+        <p class="note">Use TorBox with Stremio for media already in your TorBox account. AniTrack does not scrape torrent sources or handle third-party stream discovery.</p>
+        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torboxStremio">Set up TorBox in Stremio ↗</button> <button class="btn small" data-act="torboxSettings">TorBox settings ↗</button></div><span class="hint">TorBox discontinued its official hosted Stremio addon. The Stremio setup opens a community addon that exposes your own TorBox library; your TorBox API key is entered in that addon, not stored by AniTrack.</span></div>
       </section>`;
   }
 
@@ -2308,7 +2308,11 @@ window.__require = require;
       window.api.playerExternal();
       return;
     }
-    if (act === 'torbox') {
+    if (act === 'torboxStremio') {
+      window.api.openExternal('https://st-tor.notkek.workers.dev/');
+      return;
+    }
+    if (act === 'torboxSettings') {
       window.api.openExternal('https://torbox.app/settings?section=stremio-settings');
       return;
     }
