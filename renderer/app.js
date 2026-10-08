@@ -523,7 +523,7 @@
       a.builtInClient
         ? 'Optional. Only if you want to log in through your own AniList API client instead of the built-in one.'
         : 'Needed once to log in: create a free client at anilist.co/settings/developer and paste its ID here.'
-    } Its redirect URL must be <b>${esc(redirect)}</b>.</span></div>`;
+    } Its redirect URL must be <b>${esc(redirect)}</b>${WEB ? ' (not http://localhost/anitrack, which only works in the Mac app)' : ''}.</span></div>`;
     const advanced = a.builtInClient ? `<details class="field adv"><summary>Advanced</summary>${clientField}</details>` : clientField;
     if (a.loggedIn) {
       const guest = d.guestItems
@@ -709,6 +709,7 @@
       <ol class="steps"><li>In the AniList window, log in if asked and tap <b>Authorize</b>.</li>
         <li>Tap <b>Copy code</b> on the page that follows, then <b>Done</b> to come back here.</li>
         <li>Tap <b>Paste code</b>.</li></ol>
+      <p class="hint">If Safari says it can't connect to the server, that is fine: your code is in its address. Tap the address bar, copy the whole address, come back and tap Paste code. To avoid this next time, set your AniList client's redirect URL to <b>${esc(S.data?.redirectUrl || '')}</b>.</p>
       <button class="btn primary big wide" data-sheet="paste">Paste code</button>
       <form data-sheet="form"><input type="text" name="code" placeholder="Or paste the code here" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="AniList code"><button class="btn">Log in</button></form>
       <p class="sheet-msg" role="status"></p>
