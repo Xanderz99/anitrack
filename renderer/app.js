@@ -620,45 +620,12 @@
       </div></section>`;
   }
 
-  function addonList() {
-    const v = store.get('stremioAddons', []);
-    return Array.isArray(v) ? v : [];
-  }
-  function saveAddonList(v) { store.set('stremioAddons', v.slice(0, 30)); }
-  function stremioUrl(url) {
-    const u = new URL(url);
-    return 'stremio://' + u.host + u.pathname + u.search + u.hash;
-  }
-  async function getAddon(url) {
-    let u = String(url || '').trim();
-    if (!/^https?:\\/\\//i.test(u)) throw new Error('Enter an HTTPS manifest URL.');
-    if (u.endsWith('/')) u += 'manifest.json';
-    const res = await fetch(u, { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    if (!res.ok) throw new Error('Could not read the manifest (HTTP ' + res.status + ').');
-    const m = await res.json();
-    for (const k of ['id','version','name','description','resources','types']) if (m[k] == null) throw new Error('Manifest is missing ' + k + '.');
-    return { id:String(m.id), version:String(m.version), name:String(m.name), description:String(m.description), logo:typeof m.logo === 'string' ? m.logo : '', url:u, configurable:!!m.behaviorHints?.configurable };
-  }
-  function addonsSection() {
-    const rows = addonList().map((a) => '<div class="field"><div><b>' + esc(a.name) + '</b><div class="hint">v' + esc(a.version) + ' · ' + esc(a.description) + '</div></div><div><button class="btn primary small" data-act="installAddon" data-addon-id="' + esc(a.id) + '">Install in Stremio ↗</button>' + (a.configurable ? ' <button class="btn small" data-act="configureAddon" data-addon-id="' + esc(a.id) + '">Configure ↗</button>' : '') + ' <button class="btn small" data-act="removeAddon" data-addon-id="' + esc(a.id) + '">Remove</button></div></div>').join('');
-    return '<section class="section"><h2>Stremio Addons</h2><p class="note">Add a Stremio addon by its manifest URL. AniTrack stores the addon details on this device.</p><form data-form="stremioAddon" class="field"><label for="addonUrl">Addon manifest URL</label><div><input id="addonUrl" name="url" type="url" placeholder="https://example.com/manifest.json" required><button class="btn primary" type="submit">Add addon</button></div><span class="hint">Stremio addons expose a manifest.json describing their capabilities.</span></form>' + (rows || '<p class="note">No addons added yet.</p>') + '</section>';
-  }
-  function torboxSection() {
-    return `<section class="section">
-        <h2>TorBox / Stremio</h2>
-        <p class="note">Use TorBox with Stremio for media already in your TorBox account. AniTrack does not scrape torrent sources or handle third-party stream discovery.</p>
-        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torboxStremio">Set up TorBox in Stremio ↗</button> <button class="btn small" data-act="torboxSettings">TorBox settings ↗</button></div><span class="hint">TorBox discontinued its official hosted Stremio addon. The Stremio setup opens a community addon that exposes your own TorBox library; your TorBox API key is entered in that addon, not stored by AniTrack.</span></div>
-      </section>`;
-  }
-
   function settingsHtml() {
     const d = S.data;
     const st = d.settings;
     if (WEB) {
       return `
       ${accountSection(d)}
-      ${torboxSection()}
-      ${addonsSection()}
       <section class="section">
         <h2>Watching on iPhone</h2>
         <p class="note">Watch opens the show on Crunchyroll. When you come back, AniTrack asks whether you finished the episode and marks it on AniList for you.</p>
@@ -670,8 +637,6 @@
     }
     return `
       ${accountSection(d)}
-      ${torboxSection()}
-      ${addonsSection()}
       <section class="section">
         <h2>Watching</h2>
         <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
@@ -1105,22 +1070,6 @@
       window.api.playerExternal();
       return;
     }
-    if (['installAddon','configureAddon','removeAddon'].includes(act)) {
-      const addon = addonList().find((x) => x.id === btn.dataset.addonId);
-      if (!addon) return;
-      if (act === 'removeAddon') { saveAddonList(addonList().filter((x) => x.id !== addon.id)); toast('Addon removed'); render(); return; }
-      if (act === 'configureAddon') { window.api.openExternal(new URL('configure', new URL(addon.url)).href); return; }
-      window.api.openExternal(stremioUrl(addon.url));
-      return;
-    }
-    if (act === 'torboxStremio') {
-      window.api.openExternal('https://st-tor.notkek.workers.dev/');
-      return;
-    }
-    if (act === 'torboxSettings') {
-      window.api.openExternal('https://torbox.app/settings?section=stremio-settings');
-      return;
-    }
     const cardEl = btn.closest('[data-id]');
     const id = cardEl ? Number(cardEl.dataset.id) : null;
     const s = id ? anyById(id) : null;
@@ -1171,18 +1120,6 @@
   });
 
   document.addEventListener('submit', async (e) => {
-    const addonForm = e.target.closest('[data-form="stremioAddon"]');
-    if (addonForm) {
-      e.preventDefault();
-      try {
-        const addon = await getAddon(addonForm.elements.url.value);
-        saveAddonList([addon, ...addonList().filter((x) => x.id !== addon.id)]);
-        addonForm.reset();
-        toast(addon.name + ' added');
-        render();
-      } catch (err) { toast(err?.message || 'Could not add addon.'); }
-      return;
-    }
     const form = e.target.closest('[data-form="welcomeName"]');
     if (!form) return;
     e.preventDefault();

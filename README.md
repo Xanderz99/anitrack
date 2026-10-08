@@ -83,12 +83,6 @@ Run `npm test` to run the tests (taste matching, dub matching, the AniList clien
 - **Every legal service**: cards list where a show streams. Shows that are not on Crunchyroll open on the service that has them (Netflix, HIDIVE and so on).
 - Shortcuts: ⌘1–⌘8 switch views, `/` or ⌘F search, Esc closes the player or clears search.
 
-## TorBox / Stremio
-
-AniTrack can hand off TorBox setup to the official TorBox Stremio integration. In **Settings**, choose **Set up TorBox in Stremio**. Complete the TorBox setup in Stremio, then use Stremio for playback.
-
-AniTrack deliberately does not embed a torrent-source scraper or reproduce TorBox's streaming service. TorBox's official integration handles its own account, provider configuration and playback.
-
 ## iPhone (free, as a Home Screen app)
 
 The same app runs on iPhone as a web app. It tracks, recommends and syncs to AniList exactly like the Mac version, so both stay in step. Crunchyroll opens in its own app; when you come back, AniTrack asks "Finished episode N?" and marks it with one tap.
