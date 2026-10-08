@@ -198,6 +198,14 @@
     refresh,
     setTrack: core.setTrack,
     rate: core.rate,
+    async details(id) {
+      try {
+        const show = await core.details(id);
+        return show ? { show, resume: null } : { error: 'Could not find that show on AniList.' };
+      } catch (e) {
+        return { error: `Could not load the show: ${e.message}` };
+      }
+    },
     async search(q) {
       try {
         return { shows: await core.search(q) };

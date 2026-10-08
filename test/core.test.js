@@ -306,3 +306,27 @@ test('rating saves to AniList and marks your taste for relearning', async () => 
   settings.patch({ token: '' });
   assert.match((await core.rate(1, 7)).error, /Log in/);
 });
+
+test('details: full synopsis, trailer, related seasons, and lookup of shows not loaded', async () => {
+  const rich = media(1, {
+    description: 'Line one.<br><br>Line <i>two</i>.',
+    trailer: { site: 'youtube', id: 'abc123XYZ' },
+    relations: { edges: [
+      { relationType: 'SEQUEL', node: { id: 2, type: 'ANIME', format: 'TV', title: { english: 'Season 2' } } },
+      { relationType: 'PREQUEL', node: { id: 3, type: 'ANIME', format: 'TV', title: { romaji: 'Zero' } } },
+      { relationType: 'ADAPTATION', node: { id: 4, type: 'MANGA', title: { romaji: 'Manga' } } },
+    ] },
+  });
+  const { core, AL } = setup({ shows: [rich] });
+  await core.refresh({});
+  const d = await core.details(1);
+  assert.strictEqual(d.synopsis, 'Line one.\n\nLine two.');
+  assert.strictEqual(d.trailer, 'https://www.youtube.com/watch?v=abc123XYZ');
+  assert.deepStrictEqual(d.related.map((r) => [r.relation, r.title]), [['Prequel', 'Zero'], ['Sequel', 'Season 2']]);
+
+  let looked = 0;
+  AL.fetchByIds = async (ids) => (looked++, ids.map((id) => media(id)));
+  assert.strictEqual((await core.details(77)).title, 'Show 77');
+  await core.details(77);
+  assert.strictEqual(looked, 1, 'a looked-up show is remembered');
+});

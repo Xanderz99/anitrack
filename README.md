@@ -78,6 +78,8 @@ Run `npm test` to run the tests (taste matching, dub matching, the AniList clien
 - **Undo** after changing a status or episode count; cards show a progress bar.
 - **Search any anime**: the search box filters the view you are on, then also searches all of AniList, so you can track shows from any season.
 - **Rate when you finish**: marking the last episode asks for a 1-10 score, saved to AniList (it also sharpens For You).
+- **Show details**: tap a poster or title for the full synopsis, trailer, where to watch, episode progress and status, and related seasons (tap one to jump to it).
+- **Pull down to refresh** on iPhone. Countdowns tick live without redrawing the page.
 - **Every legal service**: cards list where a show streams. Shows that are not on Crunchyroll open on the service that has them (Netflix, HIDIVE and so on).
 - Shortcuts: ⌘1–⌘8 switch views, `/` or ⌘F search, Esc closes the player or clears search.
 

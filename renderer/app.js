@@ -76,6 +76,8 @@
   // For url('…') inside a style attribute: percent-encode anything that could end the value early.
   const cssUrl = (u) => esc(String(u || '').replace(/["'()\\\s]/g, encodeURIComponent));
 
+  // A countdown that ticks by itself (see the minute timer), so the page needs no full redraw for it.
+  const relSpan = (ts) => `<span class="rel" data-at="${ts}">${rel(ts)}</span>`;
   function rel(ts) {
     let s = Math.round(ts - Date.now() / 1000);
     const past = s < 0;
@@ -134,10 +136,10 @@
     const me = s.me;
     const pct = me.status && s.episodes ? Math.min(100, Math.round((me.progress / s.episodes) * 100)) : 0;
     return `<article class="tile" data-id="${s.id}" style="${s.color ? `--tint:${esc(s.color)}` : ''}">
-      <button class="poster" data-act="watch" aria-label="Watch ${esc(s.title)}" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover, i < 4) : ''}
+      <button class="poster" data-act="details" aria-label="${esc(s.title)}: details" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover, i < 4) : ''}
         ${s.dub === 'announced' ? '<span class="badge">DUB</span>' : ''}${s.match != null && !me.status ? `<span class="badge m">${s.match}%</span>` : ''}${badge ? `<span class="badge new">${esc(badge)}</span>` : ''}
         ${pct ? `<span class="track"><i style="width:${pct}%"></i></span>` : ''}</button>
-      <div class="tt" title="${esc(s.title)}">${esc(s.title)}</div><div class="ts">${esc(sub)}</div></article>`;
+      <div class="tt" title="${esc(s.title)}">${esc(s.title)}</div><div class="ts">${sub}</div></article>`;
   }
   function shelf(title, items, subFn, badgeFn = () => '') {
     if (!items.length) return '';
@@ -166,7 +168,7 @@
         : hero.me.status
           ? ''
           : `<button class="btn big icon" data-act="plan" aria-label="Plan to watch" title="Plan to watch">${ICON.plus}</button>`;
-      const info = hero.siteUrl ? `<button class="btn big icon" data-act="ext" data-url="${esc(hero.siteUrl)}" aria-label="Open on AniList" title="Open on AniList">${ICON.info}</button>` : '';
+      const info = `<button class="btn big icon" data-act="details" aria-label="Details" title="Details">${ICON.info}</button>`;
       const art = hero.coverXL || hero.cover;
       html += `<section class="hero ${hero.banner ? 'has-banner' : ''}" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
         <div class="hero-bg" style="background-image:url('${cssUrl(hero.banner || art)}')"></div>
@@ -181,10 +183,10 @@
     const planning = shows.filter((s) => s.me.status === 'PLANNING');
     const epSub = (s) => (s.resume && !s.resume.done && s.resume.time > 30 ? `Ep ${s.resume.ep || s.me.progress + 1} · ${clock(s.resume.time)} in` : `Episode ${s.me.progress + 1}`);
     html += shelf('Up Next', upNext, epSub, (s) => (aired(s) - s.me.progress > 1 ? `${aired(s) - s.me.progress} new` : ''));
-    html += shelf('Airing This Week', airing, (s) => `Ep ${s.next.episode} · ${rel(s.next.airingAt)}`);
-    html += shelf('Top Picks for You', foryou.slice(0, 16), (s) => (s.why && s.why.length ? s.why.slice(0, 2).join(', ') : s.genres.slice(0, 2).join(', ')));
-    html += shelf('New This Week', fresh, (s) => isNew(s));
-    html += shelf('Plan to Watch', planning, (s) => (s.next ? `Ep ${s.next.episode} · ${rel(s.next.airingAt)}` : s.genres.slice(0, 2).join(', ')));
+    html += shelf('Airing This Week', airing, (s) => `Ep ${s.next.episode} · ${relSpan(s.next.airingAt)}`);
+    html += shelf('Top Picks for You', foryou.slice(0, 16), (s) => esc(s.why && s.why.length ? s.why.slice(0, 2).join(', ') : s.genres.slice(0, 2).join(', ')));
+    html += shelf('New This Week', fresh, (s) => esc(isNew(s)));
+    html += shelf('Plan to Watch', planning, (s) => (s.next ? `Ep ${s.next.episode} · ${relSpan(s.next.airingAt)}` : esc(s.genres.slice(0, 2).join(', '))));
     return html || '<div class="empty">Nothing to show yet. Log in with AniList in Settings, or pick shows to track from This Season.</div>';
   }
   function tonightPicks() {
@@ -327,7 +329,7 @@
     if (s.next) {
       const d = new Date(s.next.airingAt * 1000);
       const live = s.next.airingAt * 1000 <= Date.now();
-      return `<div class="next ${live ? 'live' : ''}">Ep ${s.next.episode} · ${dayFmt.format(d)}, ${timeFmt.format(d)} · ${rel(s.next.airingAt)}</div>`;
+      return `<div class="next ${live ? 'live' : ''}">Ep ${s.next.episode} · ${dayFmt.format(d)}, ${timeFmt.format(d)} · ${relSpan(s.next.airingAt)}</div>`;
     }
     if (s.start && s.start.year && s.airStatus === 'NOT_YET_RELEASED') {
       const { year, month, day } = s.start;
@@ -352,7 +354,6 @@
 
   function card(s) {
     const me = s.me;
-    const total = s.episodes ? ` / ${s.episodes}` : '';
     const behind = me.status === 'WATCHING' && aired(s) != null && aired(s) > me.progress ? aired(s) - me.progress : 0;
     const matchLine =
       s.match != null
@@ -360,18 +361,14 @@
             s.against.length ? `${s.why.length ? ' · ' : ''}Not your usual: ${esc(s.against.join(', '))}` : ''
           }</div>`
         : '';
-    const opts = ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP']
-      .map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${v ? STATUS_LABEL[v] : 'Not tracking'}</option>`)
-      .join('');
-    const status = ['COMPLETED', 'PAUSED'].includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
     const pct = me.status && s.episodes ? Math.min(100, Math.round((me.progress / s.episodes) * 100)) : 0;
     return `<article class="card" data-id="${s.id}" style="${s.color ? `--tint:${esc(s.color)}` : ''}">
-      <div class="cover" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover) : ''}</div>
+      <div class="cover" data-act="details" role="button" tabindex="-1" aria-hidden="true" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover) : ''}</div>
       <div class="info">
         <div class="head">
-          <div class="title">${esc(s.title)}</div>
+          <button class="title tlink" data-act="details">${esc(s.title)}</button>
           ${s.match != null ? `<span class="score ${s.match < 45 ? 'low' : ''}" title="How well this fits your AniList ratings">${s.match}%</span>` : ''}
-          ${s.siteUrl ? `<button class="link ext" data-act="ext" data-url="${esc(s.siteUrl)}" aria-label="Open ${esc(s.title)} on AniList" title="Open on AniList">${ICON.info}</button>` : ''}
+          <button class="link ext" data-act="details" aria-label="${esc(s.title)}: details" title="Details">${ICON.info}</button>
         </div>
         <div class="meta">${esc([s.genres.slice(0, 3).join(', '), s.episodes ? `${s.episodes} eps` : 'ongoing', s.studio].filter(Boolean).join(' · '))}</div>
         ${matchLine}
@@ -379,16 +376,27 @@
         ${nextLine(s)}
         ${pct ? `<div class="track" title="${me.progress} of ${s.episodes} watched"><i style="width:${pct}%"></i></div>` : ''}
       </div>
-        <div class="acts">
-          <button class="btn primary small" data-act="watch">${watchLabel(s)}</button>
+        ${actsHtml(s)}
+    </article>`;
+  }
+
+  // Watch, status and the episode stepper: shared by cards and the details page.
+  function actsHtml(s) {
+    const me = s.me;
+    const total = s.episodes ? ` / ${s.episodes}` : '';
+    const opts = ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP']
+      .map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${v ? STATUS_LABEL[v] : 'Not tracking'}</option>`)
+      .join('');
+    const status = ['COMPLETED', 'PAUSED'].includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
+    return `<div class="acts">
+          <button class="btn primary small" data-act="watch">${esc(watchLabel(s))}</button>
           <select data-act="status" aria-label="Status for ${esc(s.title)}">${opts}${status}</select>
           ${
             me.status === 'WATCHING'
               ? `<span class="prog"><button class="btn small" data-act="dec" aria-label="One episode back">−</button>Ep ${me.progress}${total}<button class="btn small" data-act="inc">+1</button></span>`
               : ''
           }
-        </div>
-    </article>`;
+        </div>`;
   }
 
   function tastePanel() {
@@ -415,7 +423,7 @@
     const sel = LIST_TABS.map((v) => `<option value="${v}" ${listStatus(e) === v ? 'selected' : ''}>${STATUS_LABEL[v]}</option>`).join('');
     return `<div class="row" data-id="${e.id}">
       <div class="rcover" style="${e.color ? `background:${esc(e.color)}` : ''}">${e.cover ? img(e.cover) : ''}</div>
-      <div class="rmain"><div class="title">${esc(e.title)}</div><div class="meta">${esc([e.format, `${me.progress}${total} eps`].filter(Boolean).join(' · '))}</div></div>
+      <div class="rmain"><button class="title tlink" data-act="details">${esc(e.title)}</button><div class="meta">${esc([e.format, `${me.progress}${total} eps`].filter(Boolean).join(' · '))}</div></div>
       <div class="rscore" title="Your score">${e.score ? e.score : '–'}</div>
       <div class="racts">
         <button class="btn small" data-act="watch">Watch</button>
@@ -654,6 +662,7 @@
     renderNav();
     renderBar();
     renderContent();
+    if (S.detail) renderDetails();
   }
 
   // Refreshes from AniList. Ignores clicks while a load is running, so repeated taps cannot pile up requests.
@@ -722,6 +731,7 @@
   }
   function closeSheet() {
     document.querySelector('.sheet-back')?.remove();
+    S.detail = null;
   }
 
   async function submitCode(sheet, text) {
@@ -792,6 +802,57 @@
     sheet.querySelector('[data-sheet="here"]').addEventListener('click', () => submitCode(sheet, token));
   }
 
+  /* ---------- details page ---------- */
+  const anyById = (id) => byId(id) || listById(id) || searchById(id) || (S.detail?.id === id ? S.detail : null);
+
+  async function openDetails(id) {
+    openSheet('<p class="note">Loading…</p>').classList.add('detail'); // closes any open sheet first
+    S.detail = { id, loading: true };
+    const r = await window.api.details(id);
+    if (S.detail?.id !== id) return; // closed or replaced meanwhile
+    if (r.error) {
+      S.detail = null;
+      closeSheet();
+      toast(r.error);
+      return;
+    }
+    S.detail = { ...r.show, resume: r.resume };
+    renderDetails();
+  }
+
+  function renderDetails() {
+    const sheet = document.querySelector('.sheet.detail');
+    const d = S.detail;
+    if (!sheet || !d || d.loading) return;
+    const top = sheet.scrollTop;
+    const facts = [d.format?.replace('_', ' '), d.episodes ? `${d.episodes} episodes` : '', d.season, d.studio, d.score ? `${d.score}% on AniList` : ''].filter(Boolean).join(' · ');
+    const pct = d.me.status && d.episodes ? Math.min(100, Math.round((d.me.progress / d.episodes) * 100)) : 0;
+    const streams = d.streams.map((x) => `<button class="btn small" data-act="ext" data-url="${esc(x.url)}">${esc(x.site)} ↗</button>`).join('');
+    const related = d.related
+      .map((x) => `<button class="rel-item" data-act="details" data-id="${x.id}"><span class="sub">${esc(x.relation)}${x.format ? ` · ${esc(x.format.replace('_', ' '))}` : ''}</span><span>${esc(x.title)}</span>${x.me.status ? `<span class="chip">${esc(STATUS_LABEL[x.me.status] || '')}</span>` : ''}</button>`)
+      .join('');
+    sheet.innerHTML = `<div class="d-head" data-id="${d.id}">
+        <div class="d-cover" style="${d.color ? `background:${esc(d.color)}` : ''}">${d.coverXL || d.cover ? `<img src="${esc(d.coverXL || d.cover)}" alt="" decoding="async">` : ''}</div>
+        <div class="d-title"><h2>${esc(d.title)}</h2>${d.romaji && d.romaji !== d.title ? `<div class="sub">${esc(d.romaji)}</div>` : ''}
+          <div class="meta">${esc(facts)}</div>
+          ${d.match != null ? `<div class="why">${d.match}% match${d.why.length ? ` · you like ${esc(d.why.join(', '))}` : ''}</div>` : ''}
+          <div class="chips">${badges(d)}</div></div>
+        <button class="link d-close" data-sheet-close aria-label="Close">✕</button>
+      </div>
+      <div class="d-body" data-id="${d.id}">
+        ${actsHtml(d)}
+        ${nextLine(d)}
+        ${pct ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${d.me.progress}${d.episodes ? ` of ${d.episodes}` : ''} watched</span></div>` : ''}
+        ${d.synopsis ? `<p class="synopsis">${esc(d.synopsis)}</p>` : ''}
+        ${d.genres.length ? `<div class="chips">${d.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
+        ${streams ? `<h3>Where to watch</h3><div class="d-row">${streams}</div>` : ''}
+        ${d.trailer ? `<h3>Trailer</h3><div class="d-row"><button class="btn small" data-act="ext" data-url="${esc(d.trailer)}">▶ Watch the trailer ↗</button></div>` : ''}
+        ${related ? `<h3>Related</h3><div class="d-related">${related}</div>` : ''}
+        <div class="sheet-foot">${d.siteUrl ? `<button class="link" data-act="ext" data-url="${esc(d.siteUrl)}">Open on AniList ↗</button>` : '<span></span>'}<button class="link" data-sheet-close>Close</button></div>
+      </div>`;
+    sheet.scrollTop = top;
+  }
+
   // After the last episode: a quick 1-10 score, saved to AniList (it also sharpens For You).
   function rateSheet(id, title) {
     const sheet = openSheet(`<h2>You finished ${esc(title)}</h2><p class="note">How would you rate it?</p>
@@ -811,6 +872,35 @@
       if (entry) entry.score = r.score;
       toast(`Rated ${title} ${r.score}/10`);
       render();
+    });
+  }
+
+  /* ---------- pull to refresh (phones) ---------- */
+  if (WEB) {
+    const ptr = document.createElement('div');
+    ptr.className = 'ptr';
+    ptr.setAttribute('aria-hidden', 'true');
+    ptr.innerHTML = '<span>↓</span>';
+    document.body.append(ptr);
+    let startY = null;
+    let pull = 0;
+    document.addEventListener('touchstart', (e) => {
+      startY = window.scrollY <= 0 && e.touches.length === 1 && !document.querySelector('.sheet-back') && !e.target.closest?.('.shelf-row, .filters, input, select') ? e.touches[0].clientY : null;
+      pull = 0;
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (startY == null) return;
+      pull = Math.max(0, Math.min(120, (e.touches[0].clientY - startY) * 0.5));
+      ptr.style.transform = `translate(-50%, ${pull - 50}px) rotate(${pull * 3}deg)`;
+      ptr.classList.toggle('ready', pull >= 64);
+    }, { passive: true });
+    document.addEventListener('touchend', () => {
+      if (startY == null) return;
+      const go = pull >= 64;
+      startY = null;
+      ptr.style.transform = '';
+      ptr.classList.remove('ready');
+      if (go) load('Refreshing from AniList…', { force: true });
     });
   }
 
@@ -835,12 +925,13 @@
   /* ---------- actions ---------- */
   async function applyTrack(id, patch, noUndo) {
     const found = searchById(id);
-    const s = byId(id) || found;
+    const det = S.detail?.id === id ? S.detail : null;
+    const s = byId(id) || found || det;
     const l = listById(id);
     if (!s && !l) return;
     const before = { status: (s || l).me.status || null, progress: (s || l).me.progress };
     const r = await window.api.setTrack(id, patch);
-    for (const x of [byId(id), found, l]) if (x) x.me = r.me;
+    for (const x of [byId(id), found, l, det]) if (x) x.me = r.me;
     // A show added from search: reload so it appears in My Shows and the other views straight away.
     if (found && !byId(id)) S.data = await window.api.refresh({});
     if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
@@ -981,9 +1072,11 @@
     }
     const cardEl = btn.closest('[data-id]');
     const id = cardEl ? Number(cardEl.dataset.id) : null;
-    const s = id ? byId(id) || listById(id) || searchById(id) : null;
-    if (act === 'ext') window.api.openExternal(btn.dataset.url);
+    const s = id ? anyById(id) : null;
+    if (act === 'details' && id) openDetails(id);
+    else if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watch' && id) {
+      if (S.detail) closeSheet();
       const r = await window.api.watch(id);
       if (r.ok && r.external && s) {
         S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
@@ -1104,9 +1197,14 @@
     S.player = p;
     render();
   });
+  // Every minute the countdowns tick in place. A full redraw (which re-sorts and moves shows whose
+  // episode just aired) only happens every ten minutes, and never while you are typing or choosing.
+  let ticks = 0;
   setInterval(() => {
-    if (S.data && !S.player && S.view !== 'settings' && document.activeElement?.id !== 'q' && document.activeElement?.tagName !== 'SELECT') renderContent();
-  }, 60000); // keeps the countdowns fresh
+    for (const el of document.querySelectorAll('.rel[data-at]')) el.textContent = rel(Number(el.dataset.at));
+    ticks += 1;
+    if (ticks % 10 === 0 && S.data && !S.player && !S.detail && S.view !== 'settings' && document.activeElement?.id !== 'q' && document.activeElement?.tagName !== 'SELECT') renderContent();
+  }, 60000);
 
   render();
   window.api.init().then((d) => {

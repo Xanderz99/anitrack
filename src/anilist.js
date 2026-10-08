@@ -70,7 +70,8 @@ const MEDIA_FIELDS = `
       coverImage{ large extraLarge color } bannerImage studios(isMain:true){ nodes{ name } }
       startDate{ year month day } nextAiringEpisode{ episode airingAt }
       externalLinks{ site type url }
-      relations{ edges{ relationType node{ id type format } } }
+      relations{ edges{ relationType node{ id type format title{ romaji english } } } }
+      trailer{ id site }
 `;
 
 const SEASON_Q = `query($page:Int,$season:MediaSeason,$year:Int){

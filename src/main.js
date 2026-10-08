@@ -415,6 +415,14 @@ function registerIpc() {
   ipcMain.handle('app:refresh', (_e, opts) => refresh(opts || {}));
   ipcMain.handle('track:set', (_e, id, patch) => core.setTrack(Number(id), patch || {}));
   ipcMain.handle('track:rate', (_e, id, score) => core.rate(id, score));
+  ipcMain.handle('anime:details', async (_e, id) => {
+    try {
+      const show = await core.details(id);
+      return show ? { show, resume: resumeFor(Number(id)) } : { error: 'Could not find that show on AniList.' };
+    } catch (e) {
+      return { error: `Could not load the show: ${e.message}` };
+    }
+  });
   ipcMain.handle('anime:search', async (_e, q) => {
     try {
       return { shows: await core.search(String(q || '')) };

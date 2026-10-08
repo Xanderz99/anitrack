@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   setTrack: (id, patch) => invoke('track:set', id, patch),
   rate: (id, score) => invoke('track:rate', id, score),
   search: (q) => invoke('anime:search', q),
+  details: (id) => invoke('anime:details', id),
   saveSettings: (patch) => invoke('settings:save', patch),
   login: () => invoke('anilist:login'),
   logout: () => invoke('anilist:logout'),
