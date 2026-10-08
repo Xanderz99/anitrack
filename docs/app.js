@@ -1317,18 +1317,21 @@ window.__require = require;
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
-  function tile(s, sub, badge) {
+  // Posters: the show's own colour fills the frame while the image loads; the first few in a row
+  // load straight away, the rest as they scroll into view.
+  const img = (src, eager) => `<img src="${esc(src)}" alt="" ${eager ? 'loading="eager"' : 'loading="lazy"'} decoding="async">`;
+  function tile(s, sub, badge, i = 99) {
     const me = s.me;
     const pct = me.status && s.episodes ? Math.min(100, Math.round((me.progress / s.episodes) * 100)) : 0;
     return `<article class="tile" data-id="${s.id}" style="${s.color ? `--tint:${esc(s.color)}` : ''}">
-      <button class="poster" data-act="watch" aria-label="Watch ${esc(s.title)}">${s.cover ? `<img src="${esc(s.cover)}" alt="" loading="lazy">` : ''}
+      <button class="poster" data-act="watch" aria-label="Watch ${esc(s.title)}" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover, i < 4) : ''}
         ${s.dub === 'announced' ? '<span class="badge">DUB</span>' : ''}${s.match != null && !me.status ? `<span class="badge m">${s.match}%</span>` : ''}${badge ? `<span class="badge new">${esc(badge)}</span>` : ''}
         ${pct ? `<span class="track"><i style="width:${pct}%"></i></span>` : ''}</button>
       <div class="tt" title="${esc(s.title)}">${esc(s.title)}</div><div class="ts">${esc(sub)}</div></article>`;
   }
   function shelf(title, items, subFn, badgeFn = () => '') {
     if (!items.length) return '';
-    return `<section class="shelf"><h2 class="shelf-t">${title}</h2><div class="shelf-row">${items.map((s) => tile(s, subFn(s), badgeFn(s))).join('')}</div></section>`;
+    return `<section class="shelf"><h2 class="shelf-t">${title}</h2><div class="shelf-row">${items.map((s, i) => tile(s, subFn(s), badgeFn(s), i)).join('')}</div></section>`;
   }
   function homeHtml() {
     const shows = S.data.shows;
@@ -1357,7 +1360,7 @@ window.__require = require;
       const art = hero.coverXL || hero.cover;
       html += `<section class="hero ${hero.banner ? 'has-banner' : ''}" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
         <div class="hero-bg" style="background-image:url('${cssUrl(hero.banner || art)}')"></div>
-        ${art ? `<img class="hero-art" src="${esc(art)}" alt="">` : ''}
+        ${art ? `<img class="hero-art" src="${esc(art)}" alt="" fetchpriority="high" decoding="async">` : ''}
         <div class="hero-in"><div class="eyebrow">${kind}${hero.match != null && !up ? ` · ${hero.match}% match` : ''}</div>
           <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div>${prog}<div class="hero-d">${esc(blurb)}</div>
           <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(play)}</button>${second}${info}</div></div></section>`;
@@ -1553,7 +1556,7 @@ window.__require = require;
     const status = ['COMPLETED', 'PAUSED'].includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
     const pct = me.status && s.episodes ? Math.min(100, Math.round((me.progress / s.episodes) * 100)) : 0;
     return `<article class="card" data-id="${s.id}" style="${s.color ? `--tint:${esc(s.color)}` : ''}">
-      <div class="cover" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? `<img src="${esc(s.cover)}" alt="" loading="lazy">` : ''}</div>
+      <div class="cover" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover) : ''}</div>
       <div class="info">
         <div class="head">
           <div class="title">${esc(s.title)}</div>
@@ -1601,7 +1604,7 @@ window.__require = require;
     const total = e.episodes ? ` / ${e.episodes}` : '';
     const sel = LIST_TABS.map((v) => `<option value="${v}" ${listStatus(e) === v ? 'selected' : ''}>${STATUS_LABEL[v]}</option>`).join('');
     return `<div class="row" data-id="${e.id}">
-      <div class="rcover" style="${e.color ? `background:${esc(e.color)}` : ''}">${e.cover ? `<img src="${esc(e.cover)}" alt="" loading="lazy">` : ''}</div>
+      <div class="rcover" style="${e.color ? `background:${esc(e.color)}` : ''}">${e.cover ? img(e.cover) : ''}</div>
       <div class="rmain"><div class="title">${esc(e.title)}</div><div class="meta">${esc([e.format, `${me.progress}${total} eps`].filter(Boolean).join(' · '))}</div></div>
       <div class="rscore" title="Your score">${e.score ? e.score : '–'}</div>
       <div class="racts">
