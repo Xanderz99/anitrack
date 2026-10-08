@@ -6,7 +6,7 @@ const path = require('path');
 class Store {
   constructor(dir, name, defaults) {
     this.file = path.join(dir, `${name}.json`);
-    this.data = { ...defaults };
+    this.data = JSON.parse(JSON.stringify(defaults)); // deep copy: callers mutate nested objects in place
     try {
       Object.assign(this.data, JSON.parse(fs.readFileSync(this.file, 'utf8')));
     } catch {

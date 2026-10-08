@@ -9,21 +9,15 @@ const { components } = electron;
 const { Store } = require('./store');
 const { powerSaveBlocker } = electron;
 const AL = require('./anilist');
-const { buildTaste, scoreShow, summarizeTaste, listMapFrom, seasonFor } = require('./taste');
+const { createCore, buildIcs } = require('./core');
 const { makeDubMatcher } = require('./dubs');
 
 let settings;
 let tracking;
-let cache;
+let core; // shared data + sync engine (src/core.js), created once the stores exist
 let mainWin = null;
-let dubMatch = () => null;
 
-// Everything the UI shows is derived from this.
-const S = { raw: [], extra: [], list: [], listMap: {}, taste: null, season: seasonFor(new Date()), updatedAt: 0, errors: {} };
 const players = new Map(); // webContents id -> { showId, key, marked }
-
-const allRaw = () => [...S.raw, ...S.extra]; // this season plus shows you watch from earlier seasons
-const L2ME = { CURRENT: 'WATCHING', REPEATING: 'WATCHING', PLANNING: 'PLANNING', COMPLETED: 'COMPLETED', PAUSED: 'PAUSED', DROPPED: 'DROPPED' };
 const send = (channel, data) => {
   if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, data);
 };
@@ -42,56 +36,9 @@ function getToken() {
     return null;
   }
 }
+const clearToken = () => settings.patch({ token: '', viewerName: '' });
 
-/* ---------- turning raw AniList data into what the UI needs ---------- */
-function meFor(id) {
-  const t = tracking.get('items')[id];
-  const l = S.listMap[id];
-  return {
-    status: t?.status ?? (l ? L2ME[l.status] : null) ?? null,
-    progress: t?.progress ?? l?.progress ?? 0,
-    inList: !!l,
-  };
-}
-
-function enrich(r) {
-  const title = r.title.english || r.title.romaji;
-  const cr = (r.externalLinks || []).find((l) => l.type === 'STREAMING' && /crunchyroll/i.test(l.site));
-  const prequels = (r.relations?.edges || [])
-    .filter((e) => e.relationType === 'PREQUEL' && e.node.type === 'ANIME')
-    .map((e) => e.node.id);
-  const seenPrequel = prequels.some((id) => ['COMPLETED', 'REPEATING', 'CURRENT'].includes(S.listMap[id]?.status));
-  const match = scoreShow(r, S.taste);
-  return {
-    id: r.id,
-    title,
-    romaji: r.title.romaji,
-    format: r.format,
-    episodes: r.episodes,
-    duration: r.duration,
-    genres: r.genres || [],
-    tags: (r.tags || []).filter((t) => t.rank >= 60).slice(0, 5).map((t) => t.name),
-    score: r.averageScore,
-    popularity: r.popularity,
-    airStatus: r.status,
-    color: r.coverImage?.color || null,
-    cover: r.coverImage?.large || null,
-    studio: r.studios?.nodes?.[0]?.name?.trim() || '',
-    start: r.startDate,
-    next: r.nextAiringEpisode,
-    crUrl: cr?.url || null,
-    onCR: !!cr,
-    dub: dubMatch(r),
-    isSequel: prequels.length > 0,
-    needsPrequel: prequels.length > 0 && !!S.taste && !seenPrequel,
-    siteUrl: r.siteUrl,
-    description: String(r.description || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 260),
-    match: match ? match.pct : null,
-    why: match ? match.why : [],
-    against: match ? match.against : [],
-  };
-}
-
+/* ---------- what the UI gets ---------- */
 function resumeFor(id) {
   const r = tracking.get('resume')[id];
   return r ? { ep: r.ep ?? null, time: r.time, duration: r.duration, done: !!r.done } : null;
@@ -101,210 +48,17 @@ const baseUrl = (u) => String(u || '').split(/[?#]/)[0];
 
 function payload() {
   return {
-    shows: allRaw().map((r) => ({ ...enrich(r), me: meFor(r.id), resume: resumeFor(r.id), offSeason: !S.raw.includes(r) })),
-    list: S.list.map((e) => ({ ...e, me: meFor(e.id) })),
-    season: S.season,
-    updatedAt: S.updatedAt,
+    ...core.basePayload({ resumeFor }),
     settings: { userName: settings.get('userName'), clientId: settings.get('clientId'), notify: settings.get('notify'), autoMarkPct: settings.get('autoMarkPct') },
     auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '' },
-    taste: S.taste ? summarizeTaste(S.taste) : null,
-    errors: S.errors,
     drm: !!components,
   };
 }
 
-/* ---------- loading data ---------- */
-function loadFromCache() {
-  const key = `${S.season.season}-${S.season.year}`;
-  const c = cache.get('seasons')[key];
-  if (c) {
-    S.raw = c.shows;
-    S.updatedAt = c.ts;
-  }
-  const u = cache.get('user');
-  if (u && u.name === (settings.get('userName') || '').trim()) {
-    S.listMap = u.listMap;
-    S.list = u.list || [];
-    S.taste = u.taste;
-  }
-  S.extra = cache.get('extra')?.shows || [];
-}
-
-async function loadExtra(force) {
-  const inSeason = new Set(S.raw.map((r) => r.id));
-  const ids = new Set();
-  for (const [id, l] of Object.entries(S.listMap)) if (['CURRENT', 'REPEATING'].includes(l.status)) ids.add(Number(id));
-  for (const [id, t] of Object.entries(tracking.get('items'))) if (['WATCHING', 'PLANNING'].includes(t.status)) ids.add(Number(id));
-  const want = [...ids].filter((id) => !inSeason.has(id)).sort((a, b) => a - b);
-  if (!want.length) {
-    S.extra = [];
-    return;
-  }
-  const c = cache.get('extra');
-  if (c && c.ids.join(',') === want.join(',') && !force && Date.now() - c.ts < 30 * 60e3) {
-    S.extra = c.shows;
-    return;
-  }
-  try {
-    S.extra = await AL.fetchByIds(want);
-    cache.set('extra', { ts: Date.now(), ids: want, shows: S.extra });
-  } catch (e) {
-    S.errors.extra = `Could not load your other watching shows: ${e.message}`;
-    S.extra = c ? c.shows : [];
-  }
-}
-
-function compactList(entries) {
-  return entries.map((e) => ({
-    id: e.media.id,
-    title: e.media.title?.english || e.media.title?.romaji || 'Untitled',
-    romaji: e.media.title?.romaji || '',
-    cover: e.media.coverImage?.medium || null,
-    color: e.media.coverImage?.color || null,
-    format: e.media.format,
-    episodes: e.media.episodes,
-    siteUrl: e.media.siteUrl,
-    score: e.score,
-  }));
-}
-
-async function syncUser(force) {
-  const name = (settings.get('userName') || '').trim();
-  if (!name) {
-    S.listMap = {};
-    S.list = [];
-    S.taste = null;
-    return;
-  }
-  const u = cache.get('user');
-  if (u && u.name === name && !force && Date.now() - u.ts < 6 * 3600e3) {
-    S.listMap = u.listMap;
-    S.list = u.list || [];
-    S.taste = u.taste;
-    return;
-  }
-  try {
-    const entries = await AL.fetchUserList(name);
-    S.listMap = listMapFrom(entries);
-    S.list = compactList(entries);
-    S.taste = buildTaste(entries);
-    cache.set('user', { name, ts: Date.now(), listMap: S.listMap, list: S.list, taste: S.taste });
-  } catch (e) {
-    S.errors.user = `Could not read the AniList list for "${name}": ${e.message}`;
-    if (u && u.name === name) {
-      S.listMap = u.listMap;
-      S.list = u.list || [];
-      S.taste = u.taste;
-    } else {
-      S.listMap = {};
-      S.list = [];
-      S.taste = null;
-    }
-  }
-}
-
-// If you watched further on another device, AniList's number wins over a lower local one.
-function syncProgressFromList() {
-  const items = tracking.get('items');
-  let changed = false;
-  for (const [id, it] of Object.entries(items)) {
-    const l = S.listMap[id];
-    if (!l) continue;
-    if (!it.dirty && it.status !== 'SKIP' && L2ME[l.status] && it.status !== L2ME[l.status]) {
-      it.status = L2ME[l.status]; // changed on AniList itself (website, phone): the remote value wins
-      changed = true;
-    }
-    if (!it.dirty && l.progress != null && it.progress !== l.progress) {
-      it.progress = l.progress;
-      changed = true;
-    } else if (it.progress != null && l.progress != null && l.progress > it.progress) {
-      it.progress = l.progress;
-      changed = true;
-    }
-  }
-  if (changed) tracking.set('items', items);
-}
-
-async function refresh({ season, year, force, user } = {}) {
-  if (season && year) S.season = { season, year };
-  const key = `${S.season.season}-${S.season.year}`;
-  const seasons = cache.get('seasons');
-  const c = seasons[key];
-  S.errors = {};
-  const loadSeason = async () => {
-    if (c && !force && Date.now() - c.ts < 30 * 60e3) {
-      S.raw = c.shows;
-      S.updatedAt = c.ts;
-      return;
-    }
-    try {
-      const shows = await AL.fetchSeason(S.season.season, S.season.year);
-      seasons[key] = { ts: Date.now(), shows };
-      cache.set('seasons', seasons);
-      S.raw = shows;
-      S.updatedAt = Date.now();
-    } catch (e) {
-      S.errors.season = `Could not load the season from AniList: ${e.message}`;
-      S.raw = c ? c.shows : [];
-      S.updatedAt = c ? c.ts : 0;
-    }
-  };
-  await Promise.all([loadSeason(), syncUser(force && user !== false)]);
-  syncProgressFromList();
-  await loadExtra(force);
+async function refresh(opts) {
+  await core.refresh(opts);
   updateTray();
   return payload();
-}
-
-/* ---------- tracking + AniList sync ---------- */
-async function pushToAniList(id, patch, next, raw) {
-  const token = getToken();
-  let status = null;
-  if (next.status === 'COMPLETED') status = 'COMPLETED';
-  else if ('status' in patch) status = { WATCHING: 'CURRENT', PLANNING: 'PLANNING', DROPPED: 'DROPPED', PAUSED: 'PAUSED' }[next.status] || null;
-  else if ('progress' in patch && next.progress > 0) status = S.listMap[id]?.status === 'REPEATING' ? null : 'CURRENT';
-  const progress = 'progress' in patch ? next.progress : null;
-  if (progress == null && !status) return { pushed: false, reason: 'local-only' };
-  if (!token) return { pushed: false, reason: 'not-logged-in' };
-  try {
-    await AL.saveEntry(token, { mediaId: id, progress, status });
-    const old = S.listMap[id] || { score: 0, progress: 0 };
-    S.listMap[id] = { ...old, status: status || old.status || 'CURRENT', progress: progress ?? old.progress };
-    return { pushed: true };
-  } catch (e) {
-    return { pushed: false, error: e.message };
-  }
-}
-
-async function setTrack(id, patch) {
-  const items = tracking.get('items');
-  const raw = allRaw().find((r) => r.id === id);
-  const next = { ...(items[id] || {}) };
-  if ('status' in patch) {
-    if (patch.status) next.status = patch.status;
-    else delete next.status;
-  }
-  if ('progress' in patch) {
-    next.progress = Math.max(0, Math.floor(Number(patch.progress) || 0));
-    if (next.progress > 0 && (!next.status || ['PLANNING', 'PAUSED'].includes(next.status))) next.status = 'WATCHING';
-  }
-  const total = raw?.episodes || S.list.find((e) => e.id === id)?.episodes || null;
-  if (total && next.progress != null) {
-    if (next.progress >= total) {
-      next.progress = total;
-      next.status = 'COMPLETED';
-    } else if (next.status === 'COMPLETED') {
-      next.status = 'WATCHING';
-    }
-  }
-  if (next.status == null && next.progress == null) delete items[id];
-  else items[id] = next;
-  tracking.set('items', items);
-  const push = await pushToAniList(id, patch, next, raw);
-  if (push.pushed) delete items[id]?.dirty;
-  else if (push.reason !== 'local-only' && items[id] && ('progress' in patch || (patch.status && patch.status !== 'SKIP'))) items[id].dirty = true;
-  tracking.set('items', items);
-  return { me: meFor(id), ...push };
 }
 
 /* ---------- AniList login (implicit grant in a small window) ---------- */
@@ -420,7 +174,7 @@ function closePlayer() {
 
 async function openPlayer(id) {
   if (!mainWin || mainWin.isDestroyed()) return { ok: false, error: 'The main window is not open.' };
-  let raw = allRaw().find((r) => r.id === id);
+  let raw = core.findRaw(id);
   if (!raw) {
     // A show from your list that is not in the loaded season: look it up on demand.
     try {
@@ -429,9 +183,9 @@ async function openPlayer(id) {
       return { ok: false, error: `Could not look that show up on AniList: ${e.message}` };
     }
     if (!raw) return { ok: false, error: 'Could not find that show on AniList.' };
-    S.extra.push(raw);
+    core.S.extra.push(raw);
   }
-  const show = enrich(raw);
+  const show = core.enrich(raw);
   let url = show.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(show.title)}`;
   const ctx = { showId: id, key: null, marked: false, lastSave: 0, consumed: false, resumeUrl: null, resumeTime: 0 };
   const saved = tracking.get('resume')[id];
@@ -515,13 +269,13 @@ ipcMain.on('player:tick', async (event, p) => {
       tracking.set('resume', resume);
     }
   }
-  const raw = allRaw().find((r) => r.id === ctx.showId);
+  const raw = core.findRaw(ctx.showId);
   const title = raw ? raw.title.english || raw.title.romaji : 'this show';
-  const progress = meFor(ctx.showId).progress;
+  const progress = core.meFor(ctx.showId).progress;
   const parsed = parseEpisode(event.sender.getTitle());
   const ep = parsed ?? progress + 1;
   if (ep <= progress) return; // rewatching something already counted
-  const result = await setTrack(ctx.showId, { progress: ep, ...(meFor(ctx.showId).status ? {} : { status: 'WATCHING' }) });
+  const result = await core.setTrack(ctx.showId, { progress: ep, ...(core.meFor(ctx.showId).status ? {} : { status: 'WATCHING' }) });
   const synced = result.pushed ? 'and synced to AniList' : result.error ? `(AniList: ${result.error})` : '(saved locally, log in to sync)';
   send('toast', `${title}: episode ${ep} marked watched ${synced}`);
   send('data', payload());
@@ -541,14 +295,7 @@ ipcMain.handle('player:resume-time', (event) => {
 /* ---------- menu bar countdown + calendar export ---------- */
 let tray = null;
 
-function upcoming() {
-  const now = Date.now() / 1000;
-  return allRaw()
-    .filter((r) => r.nextAiringEpisode && ['WATCHING', 'PLANNING'].includes(meFor(r.id).status))
-    .map((r) => ({ id: r.id, title: r.title.english || r.title.romaji, ep: r.nextAiringEpisode.episode, at: r.nextAiringEpisode.airingAt, mins: r.duration || 24 }))
-    .filter((x) => x.at > now - 3600)
-    .sort((a, b) => a.at - b.at);
-}
+const upcoming = () => core.upcoming();
 
 const shortText = (t, n) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function until(at) {
@@ -604,14 +351,7 @@ async function exportCalendar() {
     filters: [{ name: 'Calendar', extensions: ['ics'] }],
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-  const stamp = (t) => new Date(t * 1000).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const text = (t) => String(t).replace(/([,;\\])/g, '\\$1');
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//AniTrack//EN'];
-  for (const x of items) {
-    lines.push('BEGIN:VEVENT', `UID:anitrack-${x.id}-${x.ep}@anitrack`, `DTSTAMP:${stamp(Date.now() / 1000)}`, `DTSTART:${stamp(x.at)}`, `DTEND:${stamp(x.at + x.mins * 60)}`, `SUMMARY:${text(x.title)} - Episode ${x.ep}`, 'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${text(x.title)} episode ${x.ep} is out`, 'TRIGGER:PT0M', 'END:VALARM', 'END:VEVENT');
-  }
-  lines.push('END:VCALENDAR');
-  fs.writeFileSync(res.filePath, `${lines.join('\r\n')}\r\n`);
+  fs.writeFileSync(res.filePath, buildIcs(items));
   return { ok: true, count: items.length };
 }
 
@@ -622,17 +362,17 @@ function checkAirings() {
   const now = Date.now();
   let changed = false;
   let needRefresh = false;
-  for (const r of allRaw()) {
+  for (const r of core.allRaw()) {
     const n = r.nextAiringEpisode;
     if (!n || n.airingAt * 1000 > now) continue;
-    if (!['WATCHING', 'PLANNING'].includes(meFor(r.id).status)) continue;
+    if (!['WATCHING', 'PLANNING'].includes(core.meFor(r.id).status)) continue;
     const key = `${r.id}:${n.episode}`;
     if (notified[key]) continue;
     notified[key] = now;
     changed = true;
     needRefresh = true;
     if (now - n.airingAt * 1000 < 6 * 3600e3 && Notification.isSupported()) {
-      const e = enrich(r);
+      const e = core.enrich(r);
       const note = new Notification({
         title: `${e.title}: episode ${n.episode} is out`,
         body: e.dub === 'announced' ? 'Subtitled episode is live on Crunchyroll. The English dub usually follows later.' : 'Live on Crunchyroll.',
@@ -654,12 +394,12 @@ function checkAirings() {
 /* ---------- IPC ---------- */
 function registerIpc() {
   ipcMain.handle('app:init', () => {
-    loadFromCache();
+    core.loadFromCache();
     setTimeout(() => refresh({}).then((p) => send('data', p)).catch(console.error), 50);
-    return { ...payload(), loading: S.raw.length === 0 };
+    return { ...payload(), loading: core.S.raw.length === 0 };
   });
   ipcMain.handle('app:refresh', (_e, opts) => refresh(opts || {}));
-  ipcMain.handle('track:set', (_e, id, patch) => setTrack(Number(id), patch || {}));
+  ipcMain.handle('track:set', (_e, id, patch) => core.setTrack(Number(id), patch || {}));
   ipcMain.handle('settings:save', async (_e, patch) => {
     const before = String(settings.get('userName') || '').trim();
     const allowed = {};
@@ -669,7 +409,6 @@ function registerIpc() {
     if ([0.8, 0.9, 0.95].includes(Number(patch.autoMarkPct))) allowed.autoMarkPct = Number(patch.autoMarkPct);
     settings.patch(allowed);
     if (allowed.userName !== undefined && allowed.userName !== before) {
-      cache.set('user', null);
       return refresh({ force: true });
     }
     return payload();
@@ -677,13 +416,12 @@ function registerIpc() {
   ipcMain.handle('anilist:login', async () => {
     const result = await loginAniList();
     if (result.ok) {
-      cache.set('user', null);
       return { ...result, data: await refresh({ force: true }) };
     }
     return result;
   });
   ipcMain.handle('anilist:logout', () => {
-    settings.patch({ token: '', viewerName: '' });
+    clearToken();
     return payload();
   });
   ipcMain.handle('watch:open', (_e, id) => openPlayer(Number(id)));
@@ -751,8 +489,8 @@ app.whenReady().then(async () => {
   const dir = app.getPath('userData');
   settings = new Store(dir, 'settings', { userName: 'Xanderz99', clientId: '', token: '', viewerName: '', notify: true, autoMarkPct: 0.9 });
   tracking = new Store(dir, 'tracking', { items: {}, notified: {}, resume: {} });
-  cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
-  dubMatch = makeDubMatcher(path.join(dir, 'dubs.json'));
+  const cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
+  core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(path.join(dir, 'dubs.json')), getToken, clearToken });
   registerIpc();
   createMainWindow();
   createTray();

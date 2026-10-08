@@ -43,8 +43,9 @@ function makeDubMatcher(extraFile) {
   const ann = [...BUNDLED.announced, ...(extra?.announced || [])].map(norm);
   const tbd = [...BUNDLED.tbd, ...(extra?.tbd || [])].map(norm);
   return (show) => {
-    const names = [show.title?.english, show.title?.romaji].map(norm).filter(Boolean);
-    const has = (list) => list.some((k) => names.some((n) => n.includes(k)));
+    // Whole words only, so a short entry cannot match inside an unrelated title.
+    const names = [show.title?.english, show.title?.romaji].map(norm).filter(Boolean).map((n) => ` ${n} `);
+    const has = (list) => list.some((k) => k && names.some((n) => n.includes(` ${k} `)));
     if (has(ann)) return 'announced';
     if (has(tbd)) return 'tbd';
     return null;

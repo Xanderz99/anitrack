@@ -3,41 +3,60 @@
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
+// How you use the 10-point scale. A generous scorer's 7 is a weak show and a harsh scorer's 7 a good
+// one, so scores are read relative to your own average and spread. Short lists use a neutral default.
+const DEFAULT_SCALE = { mean: 6.5, spread: 3.5 };
+function scoreScale(entries) {
+  const s = entries.map((e) => e.score).filter((x) => x > 0);
+  if (s.length < 5) return DEFAULT_SCALE;
+  const mean = s.reduce((a, b) => a + b, 0) / s.length;
+  const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
+  return { mean, spread: Math.max(1.5, sd * 1.5) };
+}
+
 // How strongly one list entry says "I like this" (+1) or "I don't" (-1). null = no signal.
-function entryValue(e) {
-  if (e.score > 0) return (e.score - 6.5) / 3.5; // 10 -> +1, 3 -> -1
+function entryValue(e, scale = DEFAULT_SCALE) {
+  if (e.score > 0) return clamp((e.score - scale.mean) / scale.spread, -1, 1);
   if (e.status === 'DROPPED') return -0.6;
   if (e.status === 'COMPLETED' || e.status === 'REPEATING') return 0.3;
   if (e.status === 'CURRENT') return 0.4;
   return null; // planning / paused with no score tells us nothing
 }
 
+const studiosOf = (media) => (media.studios?.nodes || []).map((n) => n?.name?.trim()).filter(Boolean);
+
 function buildTaste(entries) {
   const g = {};
   const t = {};
-  const add = (map, key, v) => {
-    const o = map[key] || (map[key] = { sum: 0, n: 0 });
-    o.sum += v;
+  const st = {};
+  // weight lets a tag that barely applies (rank 60) count for less than a defining one (rank 100).
+  const add = (map, key, v, weight = 1) => {
+    const o = map[key] || (map[key] = { sum: 0, w: 0, n: 0 });
+    o.sum += v * weight;
+    o.w += weight;
     o.n += 1;
   };
+  const scale = scoreScale(entries);
   for (const e of entries) {
-    const v = entryValue(e);
+    const v = entryValue(e, scale);
     if (v === null) continue;
     for (const name of e.media.genres || []) add(g, name, v);
-    for (const tag of e.media.tags || []) if (tag.rank >= 60) add(t, tag.name, v);
+    for (const tag of e.media.tags || []) if (tag.rank >= 60) add(t, tag.name, v, tag.rank / 100);
+    for (const name of studiosOf(e.media)) add(st, name, v);
   }
   const fin = (map) => {
     const w = {};
     const n = {};
     for (const [k, o] of Object.entries(map)) {
-      w[k] = o.sum / (o.n + 2); // smoothing: a single entry cannot dominate
+      w[k] = o.sum / (o.w + 2); // smoothing: a single entry cannot dominate
       n[k] = o.n;
     }
     return { w, n };
   };
   const G = fin(g);
   const T = fin(t);
-  return { genres: G.w, genreCounts: G.n, tags: T.w, tagCounts: T.n };
+  const ST = fin(st);
+  return { genres: G.w, genreCounts: G.n, tags: T.w, tagCounts: T.n, studios: ST.w, studioCounts: ST.n };
 }
 
 function scoreShow(show, taste) {
@@ -47,11 +66,14 @@ function scoreShow(show, taste) {
     .filter((x) => x.rank >= 60)
     .slice(0, 8)
     .map((x) => ({ n: x.name, w: taste.tags[x.name] ?? 0 }));
+  // A studio only counts once you have seen at least two of its shows (tastes caches from before studios were tracked have none).
+  const studio = studiosOf(show).find((n) => (taste.studioCounts?.[n] || 0) >= 2);
+  const sw = studio ? taste.studios[studio] : 0;
   const mean = (a) => (a.length ? a.reduce((s, x) => s + x.w, 0) / a.length : 0);
   const quality = ((show.averageScore || 65) - 65) / 100 * 0.4;
-  const raw = 0.55 * mean(gs) + 0.45 * mean(ts) + quality;
+  const raw = 0.55 * mean(gs) + 0.45 * mean(ts) + 0.2 * sw + quality;
   const pct = clamp(Math.round(50 + raw * 110), 1, 99);
-  const all = [...gs, ...ts];
+  const all = [...gs, ...ts, ...(studio ? [{ n: studio, w: sw }] : [])];
   const why = all.filter((x) => x.w > 0.15).sort((a, b) => b.w - a.w).slice(0, 3).map((x) => x.n);
   const against = all.filter((x) => x.w < -0.2).sort((a, b) => a.w - b.w).slice(0, 2).map((x) => x.n);
   return { pct, why, against };
@@ -82,4 +104,4 @@ function seasonFor(date) {
   return { season: SEASONS[Math.floor(date.getMonth() / 3)], year: date.getFullYear() };
 }
 
-module.exports = { buildTaste, scoreShow, summarizeTaste, listMapFrom, seasonFor, entryValue };
+module.exports = { buildTaste, scoreShow, summarizeTaste, listMapFrom, seasonFor, entryValue, scoreScale };

@@ -1,22 +1,46 @@
 'use strict';
 // Thin AniList GraphQL client (https://docs.anilist.co). Uses the global fetch in Electron's main process.
 const API = 'https://graphql.anilist.co';
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Swappable so tests run without real waiting.
+const config = { timeoutMs: 20000, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
 
-async function gql(query, variables = {}, token) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(API, {
+async function post(body, token) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), config.timeoutMs);
+  try {
+    return await fetch(API, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ query, variables }),
+      body,
+      signal: ctrl.signal,
     });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Retries rate limits (429), AniList outages (5xx) and dropped connections. Every query and the one
+// mutation here are safe to repeat: SaveMediaListEntry sets values rather than adding to them.
+async function gql(query, variables = {}, token) {
+  const body = JSON.stringify({ query, variables });
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res;
+    try {
+      res = await post(body, token);
+    } catch (e) {
+      lastErr = new Error(e.name === 'AbortError' ? 'AniList took too long to answer.' : 'Could not reach AniList. Check your internet connection.');
+      await config.sleep(1000 * (attempt + 1));
+      continue;
+    }
     if (res.status === 429) {
       const wait = Number(res.headers.get('retry-after')) || 10;
-      await sleep(Math.min(wait, 60) * 1000);
+      lastErr = new Error('AniList is rate limiting requests. Try again in a minute.');
+      await config.sleep(Math.min(wait, 60) * 1000);
       continue;
     }
     let json = null;
@@ -25,14 +49,19 @@ async function gql(query, variables = {}, token) {
     } catch {
       /* non-JSON error body */
     }
+    if (res.status >= 500 && attempt < 2) {
+      lastErr = new Error(`AniList returned HTTP ${res.status}`);
+      await config.sleep(2000 * (attempt + 1));
+      continue;
+    }
     if (!res.ok || !json || json.errors) {
       const err = new Error(json?.errors?.[0]?.message || `AniList returned HTTP ${res.status}`);
-      err.status = res.status;
+      err.status = json?.errors?.[0]?.status || res.status;
       throw err;
     }
     return json.data;
   }
-  throw new Error('AniList is rate limiting requests. Try again in a minute.');
+  throw lastErr;
 }
 
 const MEDIA_FIELDS = `
@@ -83,7 +112,7 @@ async function fetchByIds(ids) {
 
 const USER_Q = `query($u:String){
   MediaListCollection(userName:$u, type:ANIME){
-    lists{ entries{ status score(format:POINT_10) progress media{ id genres tags{ name rank } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
+    lists{ entries{ status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
   }
 }`;
 
@@ -125,4 +154,4 @@ async function saveEntry(token, { mediaId, progress, status }) {
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, fetchUserList, fetchViewer, saveEntry };
+module.exports = { fetchSeason, fetchByIds, fetchUserList, fetchViewer, saveEntry, gql, config };

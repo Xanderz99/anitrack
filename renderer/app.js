@@ -49,16 +49,20 @@
     seed: Math.floor(Math.random() * 1e6),
     undo: null,
     data: null,
-    filters: Object.assign({ cr: true, dub: false, hideSeq: true, q: '' }, store.get('filters', {})),
+    filters: Object.assign({ cr: true, dub: false, hideSeq: true }, store.get('filters', {}), { genre: '', q: '' }), // genre and search reset each launch
     shownSyncHint: false,
     player: null,
     listTab: store.get('listTab', 'WATCHING'),
   };
   if (!VIEWS.some((v) => v.id === S.view)) S.view = 'home';
-  S.filters.q = '';
 
   const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
   const timeFmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
+  const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  const monthFmt = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
+  const saveFilters = () => store.set('filters', { cr: S.filters.cr, dub: S.filters.dub, hideSeq: S.filters.hideSeq });
+  // For url('…') inside a style attribute: percent-encode anything that could end the value early.
+  const cssUrl = (u) => esc(String(u || '').replace(/["'()\\\s]/g, encodeURIComponent));
 
   function rel(ts) {
     let s = Math.round(ts - Date.now() / 1000);
@@ -84,6 +88,7 @@
     if (opts.skipToggles) return true;
     if (f.cr && !s.onCR) return false;
     if (f.dub && s.dub !== 'announced') return false;
+    if (f.genre && !s.genres.includes(f.genre)) return false;
     if (opts.forYou && f.hideSeq && s.needsPrequel) return false;
     return true;
   }
@@ -136,7 +141,7 @@
       const bits = [hero.genres.slice(0, 3).join(' · '), hero.episodes ? `${hero.episodes} episodes` : '', hero.dub === 'announced' ? 'English dub' : ''].filter(Boolean);
       const blurb = upNext[0] ? `Episode ${hero.me.progress + 1} is ready${aired(hero) - hero.me.progress > 1 ? `, ${aired(hero) - hero.me.progress} waiting` : ''}.` : hero.why && hero.why.length ? `Because you like ${hero.why.join(', ')}.` : '';
       html += `<section class="hero" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
-        <div class="hero-bg" style="background-image:url('${esc(hero.cover)}')"></div>
+        <div class="hero-bg" style="background-image:url('${cssUrl(hero.cover)}')"></div>
         <div class="hero-in"><div class="eyebrow">${kind}${hero.match != null && !upNext[0] ? ` · ${hero.match}% match` : ''}</div>
           <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div><div class="hero-d">${esc(blurb)}</div>
           <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(watchLabel(hero))}</button>
@@ -184,7 +189,8 @@
   }
 
   function listFor(view) {
-    const shows = S.data ? S.data.shows : [];
+    if (!S.data) return [];
+    const shows = S.data.shows;
     if (view === 'foryou') {
       const hasTaste = !!S.data.taste || shows.some((s) => s.match != null);
       return shows
@@ -249,6 +255,7 @@
     let html = `<h1>${v.label}</h1>`;
     if (['foryou', 'season', 'airing'].includes(S.view)) html += pill('cr', 'Crunchyroll') + pill('dub', 'English dub');
     if (S.view === 'foryou') html += pill('hideSeq', 'Hide unseen sequels');
+    if (['foryou', 'season', 'airing'].includes(S.view) && S.data) html += genreSelect();
     if (S.view === 'season') html += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
     if (S.view === 'airing' || S.view === 'mine') html += '<button class="btn small" data-act="exportCal" title="Save upcoming episodes as a calendar file">Export calendar</button>';
     if (S.view === 'list' && S.data) {
@@ -269,6 +276,13 @@
     $('#bar').innerHTML = html;
   }
 
+  function genreSelect() {
+    const all = [...new Set(S.data.shows.flatMap((s) => s.genres))].sort();
+    if (S.filters.genre && !all.includes(S.filters.genre)) all.unshift(S.filters.genre);
+    const opt = (v, label) => `<option value="${esc(v)}" ${S.filters.genre === v ? 'selected' : ''}>${esc(label)}</option>`;
+    return `<select id="genre" aria-label="Genre">${opt('', 'All genres')}${all.map((g) => opt(g, g)).join('')}</select>`;
+  }
+
   function badges(s) {
     const b = [];
     if (s.onCR) b.push('<span class="chip cr">Crunchyroll</span>');
@@ -286,7 +300,9 @@
       return `<div class="next ${live ? 'live' : ''}">Ep ${s.next.episode} · ${dayFmt.format(d)}, ${timeFmt.format(d)} · ${rel(s.next.airingAt)}</div>`;
     }
     if (s.start && s.start.year && s.airStatus === 'NOT_YET_RELEASED') {
-      return `<div class="next">Starts ${s.start.day || '?'}/${s.start.month || '?'}/${s.start.year}</div>`;
+      const { year, month, day } = s.start;
+      const when = month && day ? dateFmt.format(new Date(year, month - 1, day)) : month ? monthFmt.format(new Date(year, month - 1, 1)) : String(year);
+      return `<div class="next">Starts ${esc(when)}</div>`;
     }
     return '';
   }
@@ -455,6 +471,14 @@
     el.scrollTop = top;
   }
 
+  function syncField(d) {
+    if (!d.pending) return '<span>Everything is on AniList.</span>';
+    const n = `${d.pending} change${d.pending > 1 ? 's' : ''}`;
+    return d.auth.loggedIn
+      ? `<span>${n} not sent to AniList yet.</span> <button class="btn small" data-refresh>Sync now</button>`
+      : `<span>${n} saved here only. Log in to send ${d.pending > 1 ? 'them' : 'it'} to AniList.</span>`;
+  }
+
   function settingsHtml() {
     const d = S.data;
     const st = d.settings;
@@ -468,6 +492,7 @@
         <div class="field"><label for="userName">Username</label><input type="text" id="userName" value="${esc(st.userName)}" placeholder="Your AniList username" autocapitalize="off" autocorrect="off"><span class="hint">Used to learn your taste and see what you already watch. Your list must be public.</span></div>
         <div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" inputmode="numeric" value="${esc(st.clientId)}" placeholder="e.g. 12345"><span class="hint">Lets the app update your list. At anilist.co/settings/developer create a client with the redirect URL <b>${esc(d.redirectUrl)}</b> and paste its ID here. This is a separate client from the Mac app's.</span></div>
         <div class="field"><label>Account</label><div>${login}</div></div>
+        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
         ${d.auth.loggedIn ? '' : `<div class="field"><label for="tokenPaste">Or paste a token</label><input type="text" id="tokenPaste" placeholder="Long code from AniList" autocapitalize="off" autocorrect="off"><span class="hint">If logging in opens Safari and never comes back, set the client's redirect URL to <b>https://anilist.co/api/v2/oauth/pin</b> instead, tap Log in, copy the code AniList shows and paste it here.</span></div>`}
       </section>
       <section class="section">
@@ -484,6 +509,7 @@
         <div class="field"><label for="userName">Username</label><input type="text" id="userName" value="${esc(st.userName)}" placeholder="Your AniList username"><span class="hint">Used to learn your taste and see what you already watch. Your list must be public.</span></div>
         <div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" value="${esc(st.clientId)}" placeholder="e.g. 12345"><span class="hint">Needed once so the app can update your list. Create a free app at anilist.co/settings/developer and set its redirect URL to <b>http://localhost/anitrack</b>. Paste the ID it shows here.</span></div>
         <div class="field"><label>Account</label><div>${login}</div></div>
+        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
       </section>
       <section class="section">
         <h2>Watching</h2>
@@ -508,6 +534,21 @@
     renderNav();
     renderBar();
     renderContent();
+  }
+
+  // Refreshes from AniList. Ignores clicks while a load is running, so repeated taps cannot pile up requests.
+  async function load(msg, opts) {
+    if (S.loadingMsg) return;
+    S.loadingMsg = msg;
+    toast(msg);
+    try {
+      S.data = await window.api.refresh(opts);
+    } catch (err) {
+      toast(`Could not refresh: ${err?.message || err}`);
+    } finally {
+      S.loadingMsg = null;
+    }
+    render();
   }
 
   /* ---------- toast ---------- */
@@ -575,14 +616,12 @@
     if (filter) {
       const k = filter.dataset.filter;
       S.filters[k] = !S.filters[k];
-      store.set('filters', { cr: S.filters.cr, dub: S.filters.dub, hideSeq: S.filters.hideSeq });
+      saveFilters();
       render();
       return;
     }
     if (e.target.closest('[data-refresh]')) {
-      toast('Refreshing from AniList…');
-      S.data = await window.api.refresh({ force: true });
-      render();
+      load('Refreshing from AniList…', { force: true });
       return;
     }
     const sw = e.target.closest('[data-season]');
@@ -597,9 +636,7 @@
         i = 0;
         y += 1;
       }
-      toast(`Loading ${SEASONS[i].toLowerCase()} ${y}…`);
-      S.data = await window.api.refresh({ season: SEASONS[i], year: y });
-      render();
+      load(`Loading ${SEASONS[i].toLowerCase()} ${y}…`, { season: SEASONS[i], year: y });
       return;
     }
     const btn = e.target.closest('[data-act]');
@@ -673,6 +710,11 @@
     if (t.id === 'sort') {
       S.sort = t.value;
       store.set('sort', S.sort);
+      render();
+      return;
+    }
+    if (t.id === 'genre') {
+      S.filters.genre = t.value;
       render();
       return;
     }
