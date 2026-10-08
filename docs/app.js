@@ -900,7 +900,7 @@ window.__require = require;
   const onOfficialSite = () => location.origin + location.pathname === config.webUrl;
   const clientId = () => String(settings.get('clientId') || '').trim() || (onOfficialSite() ? String(config.anilistClientId || '') : '');
 
-  const listeners = { data: [], toast: [], player: [] };
+  const listeners = { data: [], toast: [], player: [], login: [] };
   const emit = (ch, d) => (listeners[ch] || []).forEach((cb) => cb(d));
   const redirectUrl = () => location.origin + location.pathname;
 
@@ -923,8 +923,19 @@ window.__require = require;
 
   /* ---------- login: AniList sends us back to this page with #access_token=… ---------- */
   const PENDING_LOGIN = 'anitrack:loginStarted';
-  // Returns a message for the UI, or { confirm } when the token arrived without this app asking for it
-  // (a link someone else made could otherwise log you into their account).
+  // Home Screen apps on iOS are a sandboxed browser: AniList's pages often load blank inside them and
+  // redirects rarely find their way back. There, login happens in a Safari sheet and the code is pasted back.
+  const standalone = () => navigator.standalone === true || !!window.matchMedia?.('(display-mode: standalone)').matches;
+  // A pasted code may be the bare token, or a whole redirect URL that contains it.
+  const tokenFrom = (text) => {
+    const t = String(text || '').trim();
+    const m = /access_token=([^&\s]+)/.exec(t);
+    return m ? decodeURIComponent(m[1]) : t.replace(/\s+/g, '');
+  };
+
+  // Returns a message for the UI, or { handoff } when the token arrived without this copy of the app
+  // asking for it: either the Safari sheet a Home Screen login opened (the code is then copied back to
+  // the app), or a link someone else made (which must never log you in silently).
   async function finishLoginFromHash() {
     const m = /[#&]access_token=([^&]+)/.exec(location.hash);
     if (!m) return null;
@@ -940,7 +951,7 @@ window.__require = require;
     if (Date.now() - started < 30 * 60e3) return useToken(token);
     try {
       const viewer = await AL.fetchViewer(token);
-      return { confirm: viewer.name, token };
+      return { handoff: { name: viewer.name, token } };
     } catch (e) {
       return `AniList rejected the login: ${e.message}`;
     }
@@ -985,10 +996,10 @@ window.__require = require;
     async init() {
       navigator.storage?.persist?.().catch(() => {}); // asks Safari not to clear this app's data
       let loginMsg = await finishLoginFromHash();
-      if (loginMsg && loginMsg.confirm) {
-        const { confirm, token } = loginMsg;
+      if (loginMsg && loginMsg.handoff) {
+        const { handoff } = loginMsg;
         loginMsg = null;
-        setTimeout(() => emit('toast', { msg: `Log in to AniTrack as ${confirm}?`, action: { label: 'Log in', fn: () => api.loginWithToken(token).then((r) => (emit('data', r.data), emit('toast', r.msg), setTimeout(guestOffer, 2500))) } }), 300);
+        setTimeout(() => emit('login', handoff), 300);
       } else if (loginMsg) {
         setTimeout(() => emit('toast', loginMsg), 300);
         setTimeout(guestOffer, 2500);
@@ -1028,17 +1039,22 @@ window.__require = require;
     async login() {
       const id = clientId();
       if (!/^\d+$/.test(id)) return { ok: false, error: 'Enter your AniList client ID in Settings first (it is a number).' };
+      const url = `https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`;
+      // window.open runs before any await, so it still counts as the tap that allows a new window.
+      if (standalone() && window.open(url, '_blank')) return { ok: false, paste: true };
       try {
         localStorage.setItem(PENDING_LOGIN, String(Date.now()));
       } catch {
         /* the confirm prompt covers this */
       }
-      location.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`;
+      location.href = url;
       return new Promise(() => {}); // the page is leaving
     },
     // Fallback when the redirect lands in Safari instead of the Home Screen app: AniList's "pin" page shows the token to copy.
     async loginWithToken(token) {
-      const msg = await useToken(String(token || '').trim());
+      const t = tokenFrom(token);
+      if (t.length < 40) return { ok: false, msg: 'That does not look like an AniList code. Copy the whole code and try again.', data: payload() };
+      const msg = await useToken(t);
       const ok = !!getToken() && msg.startsWith('Logged');
       return { ok, msg, data: ok ? await refresh({ force: true }) : payload() };
     },
@@ -1764,6 +1780,89 @@ window.__require = require;
   window.addEventListener('scroll', onScroll, { passive: true });
   $('#content').addEventListener('scroll', onScroll, { passive: true });
 
+  /* ---------- login sheets (Home Screen app: log in in Safari, paste the code back) ---------- */
+  function openSheet(html) {
+    closeSheet();
+    const back = document.createElement('div');
+    back.className = 'sheet-back';
+    back.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+    back.addEventListener('click', (e) => {
+      if (e.target === back || e.target.closest('[data-sheet-close]')) closeSheet();
+    });
+    document.body.append(back);
+    return back.querySelector('.sheet');
+  }
+  function closeSheet() {
+    document.querySelector('.sheet-back')?.remove();
+  }
+
+  async function submitCode(sheet, text) {
+    const msgEl = sheet.querySelector('.sheet-msg');
+    msgEl.textContent = 'Checking with AniList…';
+    const r = await window.api.loginWithToken(text);
+    S.data = r.data;
+    if (!r.ok) {
+      msgEl.textContent = r.msg;
+      return;
+    }
+    closeSheet();
+    toast(r.msg);
+    offerGuest();
+    render();
+  }
+
+  // In the Home Screen app, after AniList opened in a Safari sheet.
+  function pasteSheet() {
+    const sheet = openSheet(`<h2>Finish logging in</h2>
+      <ol class="steps"><li>In the AniList window, log in if asked and tap <b>Authorize</b>.</li>
+        <li>Tap <b>Copy code</b> on the page that follows, then <b>Done</b> to come back here.</li>
+        <li>Tap <b>Paste code</b>.</li></ol>
+      <button class="btn primary big wide" data-sheet="paste">Paste code</button>
+      <form data-sheet="form"><input type="text" name="code" placeholder="Or paste the code here" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="AniList code"><button class="btn">Log in</button></form>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><button class="link" data-act="login">Open AniList again</button><button class="link" data-sheet-close>Cancel</button></div>`);
+    sheet.querySelector('[data-sheet="paste"]').addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) return submitCode(sheet, text);
+      } catch {
+        /* no clipboard access: the field below works */
+      }
+      sheet.querySelector('.sheet-msg').textContent = 'Could not read the clipboard. Long-press the box below, tap Paste, then Log in.';
+      sheet.querySelector('input').focus();
+    });
+    sheet.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = e.target.elements.code.value;
+      if (v.trim()) submitCode(sheet, v);
+    });
+  }
+
+  // In the Safari sheet that AniList returned to (or after a login link this browser did not start).
+  function handoffSheet({ name, token }) {
+    const sheet = openSheet(`<h2>Almost there, ${esc(name)}</h2>
+      <p class="note">Tap <b>Copy code</b>, go back to the AniTrack app (tap <b>Done</b> at the top), and tap <b>Paste code</b>.</p>
+      <button class="btn primary big wide" data-sheet="copy">Copy code</button>
+      <textarea class="code" readonly hidden aria-label="Your AniList code"></textarea>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><button class="link" data-sheet="here">Use AniTrack in this browser instead</button><button class="link" data-sheet-close>Close</button></div>
+      <p class="hint">Only continue if you just tapped Log in yourself. Keep this code private: it lets an app update your AniList list.</p>`);
+    sheet.querySelector('[data-sheet="copy"]').addEventListener('click', async () => {
+      const msgEl = sheet.querySelector('.sheet-msg');
+      try {
+        await navigator.clipboard.writeText(token);
+        msgEl.textContent = 'Copied. Now go back to the AniTrack app and tap Paste code.';
+      } catch {
+        const box = sheet.querySelector('.code');
+        box.hidden = false;
+        box.value = token;
+        box.select();
+        msgEl.textContent = 'Select the code above, tap Copy, then go back to the AniTrack app.';
+      }
+    });
+    sheet.querySelector('[data-sheet="here"]').addEventListener('click', () => submitCode(sheet, token));
+  }
+
   /* ---------- toast ---------- */
   let toastTimer;
   function toast(msg, action) {
@@ -1879,6 +1978,11 @@ window.__require = require;
     if (act === 'login') {
       toast('Opening AniList…');
       const r = await window.api.login();
+      if (r.paste) {
+        $('#toast').hidden = true;
+        pasteSheet();
+        return;
+      }
       if (r.ok) {
         S.data = r.data;
         toast(`Logged in as ${r.name}`);
@@ -2011,6 +2115,8 @@ window.__require = require;
         q.focus();
         q.select();
       }
+    } else if (e.key === 'Escape' && document.querySelector('.sheet-back')) {
+      closeSheet();
     } else if (e.key === 'Escape') {
       if (S.player) window.api.closePlayer();
       else if (S.filters.q) {
@@ -2042,6 +2148,7 @@ window.__require = require;
     S.data = d;
     render();
   });
+  window.api.on('login', handoffSheet);
   window.api.on('toast', (t) => (typeof t === 'string' ? toast(t) : toast(t.msg, t.action)));
   window.api.on('player', (p) => {
     S.player = p;

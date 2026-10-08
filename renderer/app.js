@@ -672,6 +672,89 @@
   window.addEventListener('scroll', onScroll, { passive: true });
   $('#content').addEventListener('scroll', onScroll, { passive: true });
 
+  /* ---------- login sheets (Home Screen app: log in in Safari, paste the code back) ---------- */
+  function openSheet(html) {
+    closeSheet();
+    const back = document.createElement('div');
+    back.className = 'sheet-back';
+    back.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+    back.addEventListener('click', (e) => {
+      if (e.target === back || e.target.closest('[data-sheet-close]')) closeSheet();
+    });
+    document.body.append(back);
+    return back.querySelector('.sheet');
+  }
+  function closeSheet() {
+    document.querySelector('.sheet-back')?.remove();
+  }
+
+  async function submitCode(sheet, text) {
+    const msgEl = sheet.querySelector('.sheet-msg');
+    msgEl.textContent = 'Checking with AniList…';
+    const r = await window.api.loginWithToken(text);
+    S.data = r.data;
+    if (!r.ok) {
+      msgEl.textContent = r.msg;
+      return;
+    }
+    closeSheet();
+    toast(r.msg);
+    offerGuest();
+    render();
+  }
+
+  // In the Home Screen app, after AniList opened in a Safari sheet.
+  function pasteSheet() {
+    const sheet = openSheet(`<h2>Finish logging in</h2>
+      <ol class="steps"><li>In the AniList window, log in if asked and tap <b>Authorize</b>.</li>
+        <li>Tap <b>Copy code</b> on the page that follows, then <b>Done</b> to come back here.</li>
+        <li>Tap <b>Paste code</b>.</li></ol>
+      <button class="btn primary big wide" data-sheet="paste">Paste code</button>
+      <form data-sheet="form"><input type="text" name="code" placeholder="Or paste the code here" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="AniList code"><button class="btn">Log in</button></form>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><button class="link" data-act="login">Open AniList again</button><button class="link" data-sheet-close>Cancel</button></div>`);
+    sheet.querySelector('[data-sheet="paste"]').addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) return submitCode(sheet, text);
+      } catch {
+        /* no clipboard access: the field below works */
+      }
+      sheet.querySelector('.sheet-msg').textContent = 'Could not read the clipboard. Long-press the box below, tap Paste, then Log in.';
+      sheet.querySelector('input').focus();
+    });
+    sheet.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = e.target.elements.code.value;
+      if (v.trim()) submitCode(sheet, v);
+    });
+  }
+
+  // In the Safari sheet that AniList returned to (or after a login link this browser did not start).
+  function handoffSheet({ name, token }) {
+    const sheet = openSheet(`<h2>Almost there, ${esc(name)}</h2>
+      <p class="note">Tap <b>Copy code</b>, go back to the AniTrack app (tap <b>Done</b> at the top), and tap <b>Paste code</b>.</p>
+      <button class="btn primary big wide" data-sheet="copy">Copy code</button>
+      <textarea class="code" readonly hidden aria-label="Your AniList code"></textarea>
+      <p class="sheet-msg" role="status"></p>
+      <div class="sheet-foot"><button class="link" data-sheet="here">Use AniTrack in this browser instead</button><button class="link" data-sheet-close>Close</button></div>
+      <p class="hint">Only continue if you just tapped Log in yourself. Keep this code private: it lets an app update your AniList list.</p>`);
+    sheet.querySelector('[data-sheet="copy"]').addEventListener('click', async () => {
+      const msgEl = sheet.querySelector('.sheet-msg');
+      try {
+        await navigator.clipboard.writeText(token);
+        msgEl.textContent = 'Copied. Now go back to the AniTrack app and tap Paste code.';
+      } catch {
+        const box = sheet.querySelector('.code');
+        box.hidden = false;
+        box.value = token;
+        box.select();
+        msgEl.textContent = 'Select the code above, tap Copy, then go back to the AniTrack app.';
+      }
+    });
+    sheet.querySelector('[data-sheet="here"]').addEventListener('click', () => submitCode(sheet, token));
+  }
+
   /* ---------- toast ---------- */
   let toastTimer;
   function toast(msg, action) {
@@ -787,6 +870,11 @@
     if (act === 'login') {
       toast('Opening AniList…');
       const r = await window.api.login();
+      if (r.paste) {
+        $('#toast').hidden = true;
+        pasteSheet();
+        return;
+      }
       if (r.ok) {
         S.data = r.data;
         toast(`Logged in as ${r.name}`);
@@ -919,6 +1007,8 @@
         q.focus();
         q.select();
       }
+    } else if (e.key === 'Escape' && document.querySelector('.sheet-back')) {
+      closeSheet();
     } else if (e.key === 'Escape') {
       if (S.player) window.api.closePlayer();
       else if (S.filters.q) {
@@ -950,6 +1040,7 @@
     S.data = d;
     render();
   });
+  window.api.on('login', handoffSheet);
   window.api.on('toast', (t) => (typeof t === 'string' ? toast(t) : toast(t.msg, t.action)));
   window.api.on('player', (p) => {
     S.player = p;

@@ -73,7 +73,7 @@
   const onOfficialSite = () => location.origin + location.pathname === config.webUrl;
   const clientId = () => String(settings.get('clientId') || '').trim() || (onOfficialSite() ? String(config.anilistClientId || '') : '');
 
-  const listeners = { data: [], toast: [], player: [] };
+  const listeners = { data: [], toast: [], player: [], login: [] };
   const emit = (ch, d) => (listeners[ch] || []).forEach((cb) => cb(d));
   const redirectUrl = () => location.origin + location.pathname;
 
@@ -96,8 +96,19 @@
 
   /* ---------- login: AniList sends us back to this page with #access_token=… ---------- */
   const PENDING_LOGIN = 'anitrack:loginStarted';
-  // Returns a message for the UI, or { confirm } when the token arrived without this app asking for it
-  // (a link someone else made could otherwise log you into their account).
+  // Home Screen apps on iOS are a sandboxed browser: AniList's pages often load blank inside them and
+  // redirects rarely find their way back. There, login happens in a Safari sheet and the code is pasted back.
+  const standalone = () => navigator.standalone === true || !!window.matchMedia?.('(display-mode: standalone)').matches;
+  // A pasted code may be the bare token, or a whole redirect URL that contains it.
+  const tokenFrom = (text) => {
+    const t = String(text || '').trim();
+    const m = /access_token=([^&\s]+)/.exec(t);
+    return m ? decodeURIComponent(m[1]) : t.replace(/\s+/g, '');
+  };
+
+  // Returns a message for the UI, or { handoff } when the token arrived without this copy of the app
+  // asking for it: either the Safari sheet a Home Screen login opened (the code is then copied back to
+  // the app), or a link someone else made (which must never log you in silently).
   async function finishLoginFromHash() {
     const m = /[#&]access_token=([^&]+)/.exec(location.hash);
     if (!m) return null;
@@ -113,7 +124,7 @@
     if (Date.now() - started < 30 * 60e3) return useToken(token);
     try {
       const viewer = await AL.fetchViewer(token);
-      return { confirm: viewer.name, token };
+      return { handoff: { name: viewer.name, token } };
     } catch (e) {
       return `AniList rejected the login: ${e.message}`;
     }
@@ -158,10 +169,10 @@
     async init() {
       navigator.storage?.persist?.().catch(() => {}); // asks Safari not to clear this app's data
       let loginMsg = await finishLoginFromHash();
-      if (loginMsg && loginMsg.confirm) {
-        const { confirm, token } = loginMsg;
+      if (loginMsg && loginMsg.handoff) {
+        const { handoff } = loginMsg;
         loginMsg = null;
-        setTimeout(() => emit('toast', { msg: `Log in to AniTrack as ${confirm}?`, action: { label: 'Log in', fn: () => api.loginWithToken(token).then((r) => (emit('data', r.data), emit('toast', r.msg), setTimeout(guestOffer, 2500))) } }), 300);
+        setTimeout(() => emit('login', handoff), 300);
       } else if (loginMsg) {
         setTimeout(() => emit('toast', loginMsg), 300);
         setTimeout(guestOffer, 2500);
@@ -201,17 +212,22 @@
     async login() {
       const id = clientId();
       if (!/^\d+$/.test(id)) return { ok: false, error: 'Enter your AniList client ID in Settings first (it is a number).' };
+      const url = `https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`;
+      // window.open runs before any await, so it still counts as the tap that allows a new window.
+      if (standalone() && window.open(url, '_blank')) return { ok: false, paste: true };
       try {
         localStorage.setItem(PENDING_LOGIN, String(Date.now()));
       } catch {
         /* the confirm prompt covers this */
       }
-      location.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`;
+      location.href = url;
       return new Promise(() => {}); // the page is leaving
     },
     // Fallback when the redirect lands in Safari instead of the Home Screen app: AniList's "pin" page shows the token to copy.
     async loginWithToken(token) {
-      const msg = await useToken(String(token || '').trim());
+      const t = tokenFrom(token);
+      if (t.length < 40) return { ok: false, msg: 'That does not look like an AniList code. Copy the whole code and try again.', data: payload() };
+      const msg = await useToken(t);
       const ok = !!getToken() && msg.startsWith('Logged');
       return { ok, msg, data: ok ? await refresh({ force: true }) : payload() };
     },

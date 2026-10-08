@@ -244,6 +244,22 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .head .score { margin-left: auto; }
 .head .title + .link.ext { margin-left: auto; }
 
+/* ===== Sheets (login hand-off) ===== */
+.sheet-back { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.55); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: min(520px, 100%); background: var(--panel); border-radius: 20px 20px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 12px; box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.4); }
+@media (min-width: 761px) { .sheet-back { align-items: center; } .sheet { border-radius: 20px; } }
+.sheet h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+.sheet .note { margin: 0; }
+.steps { margin: 0; padding-left: 20px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+.steps b, .sheet .note b { color: var(--fg); }
+.btn.wide { width: 100%; height: 50px; font-size: 16px; }
+.sheet form { display: flex; gap: 8px; }
+.sheet form input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; }
+.sheet .code { width: 100%; min-height: 80px; font: 12px ui-monospace, Menlo, monospace; background: var(--chip); color: var(--fg); border: 0; border-radius: 10px; padding: 10px; user-select: text; }
+.sheet-msg { margin: 0; min-height: 1.2em; color: var(--muted); font-size: 14px; }
+.sheet-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sheet .hint { margin: 0; }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
