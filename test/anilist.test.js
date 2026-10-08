@@ -113,3 +113,10 @@ test('saveEntry sends a 1-10 score as scoreRaw so any scoring system gets it rig
   await AL.saveEntry('tok', { mediaId: 5, score: 8 });
   assert.deepStrictEqual(calls[0].body.variables, { mediaId: 5, scoreRaw: 80 });
 });
+
+test('deleteEntry removes a list entry by its entry id', async (t) => {
+  const calls = mockFetch(t, [{ json: { data: { DeleteMediaListEntry: { deleted: true } } } }]);
+  assert.strictEqual(await AL.deleteEntry('tok', 555), true);
+  assert.deepStrictEqual(calls[0].body.variables, { id: 555 });
+  assert.match(calls[0].body.query, /DeleteMediaListEntry/);
+});

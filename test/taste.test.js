@@ -93,6 +93,7 @@ test('a studio you rate well lifts its new shows once you have seen two of their
 
 test('list map and seasons', () => {
   assert.deepStrictEqual(listMapFrom(entries)[1], { status: 'COMPLETED', score: 10, progress: 0 });
+  assert.deepStrictEqual(listMapFrom([{ id: 9, status: 'CURRENT', score: 0, progress: 1, media: { id: 3 } }])[3].entryId, 9);
   assert.deepStrictEqual(seasonFor(new Date(2026, 9, 8)), { season: 'FALL', year: 2026 });
   assert.deepStrictEqual(seasonFor(new Date(2027, 0, 1)), { season: 'WINTER', year: 2027 });
   assert.deepStrictEqual(seasonFor(new Date(2026, 6, 31)), { season: 'SUMMER', year: 2026 });

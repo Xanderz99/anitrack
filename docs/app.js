@@ -162,7 +162,7 @@ async function fetchByIds(ids) {
 
 const USER_Q = `query($u:String,$id:Int){
   MediaListCollection(userName:$u, userId:$id, type:ANIME){
-    lists{ entries{ status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
+    lists{ entries{ id status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
   }
 }`;
 
@@ -214,7 +214,14 @@ async function saveEntry(token, { mediaId, progress, status, score }) {
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+// Removes a show from the list. Takes the list entry's id (not the show's), which AniList returns
+// with the list and from SaveMediaListEntry.
+async function deleteEntry(token, entryId) {
+  const data = await gql('mutation($id:Int){ DeleteMediaListEntry(id:$id){ deleted } }', { id: entryId }, token);
+  return !!data.DeleteMediaListEntry?.deleted;
+}
+
+module.exports = { deleteEntry, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
 
   },
   taste: (module, exports, require) => {
@@ -315,7 +322,7 @@ function summarizeTaste(taste) {
 
 function listMapFrom(entries) {
   const m = {};
-  for (const e of entries) m[e.media.id] = { status: e.status, score: e.score, progress: e.progress };
+  for (const e of entries) m[e.media.id] = { status: e.status, score: e.score, progress: e.progress, ...(e.id ? { entryId: e.id } : {}) };
   return m;
 }
 
@@ -683,9 +690,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       const status = ME2L[it.status] && L2ME[l?.status] !== it.status ? ME2L[it.status] : null;
       const progress = it.progress != null && it.progress !== l?.progress ? it.progress : null;
       try {
-        if (status || progress != null) await AL.saveEntry(token, { mediaId: Number(id), progress, status });
+        const saved = status || progress != null ? await AL.saveEntry(token, { mediaId: Number(id), progress, status }) : null;
         delete it.dirty;
-        S.listMap[id] = { score: 0, ...l, status: status || l?.status || 'CURRENT', progress: progress ?? l?.progress ?? 0 };
+        S.listMap[id] = { score: 0, ...l, status: status || l?.status || 'CURRENT', progress: progress ?? l?.progress ?? 0, ...(saved?.id ? { entryId: saved.id } : {}) };
         sent += 1;
       } catch (e) {
         if (isAuthError(e)) {
@@ -753,9 +760,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     const token = getToken();
     if (!token) return { pushed: false, reason: 'not-logged-in' };
     try {
-      await AL.saveEntry(token, { mediaId: id, progress, status });
+      const saved = await AL.saveEntry(token, { mediaId: id, progress, status });
       const old = S.listMap[id] || { score: 0, progress: 0 };
-      S.listMap[id] = { ...old, status: status || old.status || 'CURRENT', progress: progress ?? old.progress };
+      S.listMap[id] = { ...old, status: status || old.status || 'CURRENT', progress: progress ?? old.progress, ...(saved?.id ? { entryId: saved.id } : {}) };
       return { pushed: true };
     } catch (e) {
       if (isAuthError(e)) {
@@ -857,6 +864,33 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     };
   }
 
+  /* ---------- removing a show from your AniList list ---------- */
+  async function removeFromList(id) {
+    id = Number(id);
+    const token = getToken();
+    if (!token) return { ok: false, error: 'Log in with AniList to change your list.' };
+    try {
+      let entryId = S.listMap[id]?.entryId;
+      // Lists cached before entry ids were kept: saving with only the show id returns the existing entry.
+      if (!entryId && S.listMap[id]) entryId = (await AL.saveEntry(token, { mediaId: id }))?.id;
+      if (entryId) await AL.deleteEntry(token, entryId);
+    } catch (e) {
+      if (isAuthError(e)) {
+        clearToken();
+        return { ok: false, error: LOGIN_EXPIRED };
+      }
+      return { ok: false, error: e.message };
+    }
+    delete S.listMap[id];
+    S.list = S.list.filter((e) => e.id !== id);
+    const items = tracking.get('items');
+    delete items[id];
+    tracking.set('items', items);
+    const u = cache.get('user');
+    if (u) cache.set('user', { ...u, ts: 0 }); // relearn taste without it on the next refresh
+    return { ok: true, me: meFor(id) };
+  }
+
   /* ---------- rating ---------- */
   // Saves a 1-10 score to AniList. Ratings drive For You, so the next refresh relearns your taste.
   async function rate(id, score) {
@@ -892,7 +926,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */
@@ -1148,6 +1182,7 @@ window.__require = require;
     refresh,
     setTrack: core.setTrack,
     rate: core.rate,
+    removeFromList: core.removeFromList,
     async details(id) {
       try {
         const show = await core.details(id);
@@ -1638,10 +1673,12 @@ window.__require = require;
   function actsHtml(s) {
     const me = s.me;
     const total = s.episodes ? ` / ${s.episodes}` : '';
-    const opts = ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP']
-      .map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${v ? STATUS_LABEL[v] : 'Not tracking'}</option>`)
-      .join('');
-    const status = ['COMPLETED', 'PAUSED'].includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
+    // A show on your AniList list is taken off it with "Remove from list" (asks first: it deletes the
+    // AniList entry). "Not tracking" only clears local tracking, which for a listed show did nothing.
+    const choices = me.inList ? ['PLANNING', 'WATCHING', 'PAUSED', 'DROPPED', 'SKIP', 'REMOVE'] : ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP'];
+    const label = (v) => (v === 'REMOVE' ? 'Remove from list…' : v ? STATUS_LABEL[v] : 'Not tracking');
+    const opts = choices.map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${label(v)}</option>`).join('');
+    const status = me.status && !choices.includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
     return `<div class="acts">
           <button class="btn primary small" data-act="watch">${esc(watchLabel(s))}</button>
           <select data-act="status" aria-label="Status for ${esc(s.title)}">${opts}${status}</select>
@@ -2107,6 +2144,26 @@ window.__require = require;
     sheet.scrollTop = top;
   }
 
+  // Takes a show off your AniList list (its progress and score there go too).
+  async function removeShow(id, ask) {
+    const s = anyById(id);
+    const title = s?.title || 'this show';
+    if (ask && !window.confirm(`Remove ${title} from your AniList list? Its progress and score there will be deleted.`)) {
+      render(); // puts the menu back
+      return;
+    }
+    const r = await window.api.removeFromList(id);
+    if (!r.ok) {
+      toast(r.error);
+      render();
+      return;
+    }
+    for (const x of [byId(id), searchById(id), S.detail?.id === id ? S.detail : null]) if (x) x.me = r.me;
+    if (S.data) S.data.list = S.data.list.filter((e) => e.id !== id);
+    toast(`Removed ${title} from your AniList list`);
+    render();
+  }
+
   // After the last episode: a quick 1-10 score, saved to AniList (it also sharpens For You).
   function rateSheet(id, title) {
     const sheet = openSheet(`<h2>You finished ${esc(title)}</h2><p class="note">How would you rate it?</p>
@@ -2184,12 +2241,14 @@ window.__require = require;
     const l = listById(id);
     if (!s && !l) return;
     const before = { status: (s || l).me.status || null, progress: (s || l).me.progress };
+    const wasListed = !!(s || l).me.inList;
     const r = await window.api.setTrack(id, patch);
     for (const x of [byId(id), found, l, det]) if (x) x.me = r.me;
     // A show added from search: reload so it appears in My Shows and the other views straight away.
     if (found && !byId(id)) S.data = await window.api.refresh({});
     if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
-    const undo = noUndo ? null : { label: 'Undo', fn: () => applyTrack(id, before, true) };
+    // Undoing the change that first put a show on your AniList list takes it off again.
+    const undo = noUndo ? null : { label: 'Undo', fn: () => (!wasListed && r.me.inList && !before.status ? removeShow(id, false) : applyTrack(id, before, true)) };
     if (r.pushed) toast(`AniList updated: ${(s || l).title}`, undo);
     else if (r.error) toast(`Saved here, but AniList said: ${r.error}`);
     else if (!noUndo && patch.progress != null) toast(`${(s || l).title}: episode ${r.me.progress}`, undo);
@@ -2358,7 +2417,8 @@ window.__require = require;
     }
     if (t.dataset.act === 'status') {
       const id = Number(t.closest('[data-id]').dataset.id);
-      applyTrack(id, { status: t.value || null });
+      if (t.value === 'REMOVE') removeShow(id, true);
+      else applyTrack(id, { status: t.value || null });
       return;
     }
     if (!S.data || S.view !== 'settings') return;
@@ -2462,6 +2522,7 @@ window.__require = require;
 
   render();
   window.__anitrackBooted = true; // tells boot.js the app started; from here the app reports its own errors
+  document.getElementById('boot-error')?.remove(); // a slow start may have shown it; the app is here now
   window.api.init().then((d) => {
     S.data = d;
     render();

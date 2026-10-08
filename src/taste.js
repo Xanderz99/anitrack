@@ -95,7 +95,7 @@ function summarizeTaste(taste) {
 
 function listMapFrom(entries) {
   const m = {};
-  for (const e of entries) m[e.media.id] = { status: e.status, score: e.score, progress: e.progress };
+  for (const e of entries) m[e.media.id] = { status: e.status, score: e.score, progress: e.progress, ...(e.id ? { entryId: e.id } : {}) };
   return m;
 }
 

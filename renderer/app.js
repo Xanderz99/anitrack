@@ -384,10 +384,12 @@
   function actsHtml(s) {
     const me = s.me;
     const total = s.episodes ? ` / ${s.episodes}` : '';
-    const opts = ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP']
-      .map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${v ? STATUS_LABEL[v] : 'Not tracking'}</option>`)
-      .join('');
-    const status = ['COMPLETED', 'PAUSED'].includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
+    // A show on your AniList list is taken off it with "Remove from list" (asks first: it deletes the
+    // AniList entry). "Not tracking" only clears local tracking, which for a listed show did nothing.
+    const choices = me.inList ? ['PLANNING', 'WATCHING', 'PAUSED', 'DROPPED', 'SKIP', 'REMOVE'] : ['', 'PLANNING', 'WATCHING', 'DROPPED', 'SKIP'];
+    const label = (v) => (v === 'REMOVE' ? 'Remove from list…' : v ? STATUS_LABEL[v] : 'Not tracking');
+    const opts = choices.map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${label(v)}</option>`).join('');
+    const status = me.status && !choices.includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
     return `<div class="acts">
           <button class="btn primary small" data-act="watch">${esc(watchLabel(s))}</button>
           <select data-act="status" aria-label="Status for ${esc(s.title)}">${opts}${status}</select>
@@ -853,6 +855,26 @@
     sheet.scrollTop = top;
   }
 
+  // Takes a show off your AniList list (its progress and score there go too).
+  async function removeShow(id, ask) {
+    const s = anyById(id);
+    const title = s?.title || 'this show';
+    if (ask && !window.confirm(`Remove ${title} from your AniList list? Its progress and score there will be deleted.`)) {
+      render(); // puts the menu back
+      return;
+    }
+    const r = await window.api.removeFromList(id);
+    if (!r.ok) {
+      toast(r.error);
+      render();
+      return;
+    }
+    for (const x of [byId(id), searchById(id), S.detail?.id === id ? S.detail : null]) if (x) x.me = r.me;
+    if (S.data) S.data.list = S.data.list.filter((e) => e.id !== id);
+    toast(`Removed ${title} from your AniList list`);
+    render();
+  }
+
   // After the last episode: a quick 1-10 score, saved to AniList (it also sharpens For You).
   function rateSheet(id, title) {
     const sheet = openSheet(`<h2>You finished ${esc(title)}</h2><p class="note">How would you rate it?</p>
@@ -930,12 +952,14 @@
     const l = listById(id);
     if (!s && !l) return;
     const before = { status: (s || l).me.status || null, progress: (s || l).me.progress };
+    const wasListed = !!(s || l).me.inList;
     const r = await window.api.setTrack(id, patch);
     for (const x of [byId(id), found, l, det]) if (x) x.me = r.me;
     // A show added from search: reload so it appears in My Shows and the other views straight away.
     if (found && !byId(id)) S.data = await window.api.refresh({});
     if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
-    const undo = noUndo ? null : { label: 'Undo', fn: () => applyTrack(id, before, true) };
+    // Undoing the change that first put a show on your AniList list takes it off again.
+    const undo = noUndo ? null : { label: 'Undo', fn: () => (!wasListed && r.me.inList && !before.status ? removeShow(id, false) : applyTrack(id, before, true)) };
     if (r.pushed) toast(`AniList updated: ${(s || l).title}`, undo);
     else if (r.error) toast(`Saved here, but AniList said: ${r.error}`);
     else if (!noUndo && patch.progress != null) toast(`${(s || l).title}: episode ${r.me.progress}`, undo);
@@ -1104,7 +1128,8 @@
     }
     if (t.dataset.act === 'status') {
       const id = Number(t.closest('[data-id]').dataset.id);
-      applyTrack(id, { status: t.value || null });
+      if (t.value === 'REMOVE') removeShow(id, true);
+      else applyTrack(id, { status: t.value || null });
       return;
     }
     if (!S.data || S.view !== 'settings') return;
@@ -1208,6 +1233,7 @@
 
   render();
   window.__anitrackBooted = true; // tells boot.js the app started; from here the app reports its own errors
+  document.getElementById('boot-error')?.remove(); // a slow start may have shown it; the app is here now
   window.api.init().then((d) => {
     S.data = d;
     render();

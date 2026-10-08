@@ -141,7 +141,7 @@ async function fetchByIds(ids) {
 
 const USER_Q = `query($u:String,$id:Int){
   MediaListCollection(userName:$u, userId:$id, type:ANIME){
-    lists{ entries{ status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
+    lists{ entries{ id status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
   }
 }`;
 
@@ -193,4 +193,11 @@ async function saveEntry(token, { mediaId, progress, status, score }) {
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+// Removes a show from the list. Takes the list entry's id (not the show's), which AniList returns
+// with the list and from SaveMediaListEntry.
+async function deleteEntry(token, entryId) {
+  const data = await gql('mutation($id:Int){ DeleteMediaListEntry(id:$id){ deleted } }', { id: entryId }, token);
+  return !!data.DeleteMediaListEntry?.deleted;
+}
+
+module.exports = { deleteEntry, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };

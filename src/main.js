@@ -415,6 +415,7 @@ function registerIpc() {
   ipcMain.handle('app:refresh', (_e, opts) => refresh(opts || {}));
   ipcMain.handle('track:set', (_e, id, patch) => core.setTrack(Number(id), patch || {}));
   ipcMain.handle('track:rate', (_e, id, score) => core.rate(id, score));
+  ipcMain.handle('track:remove', (_e, id) => core.removeFromList(id));
   ipcMain.handle('anime:details', async (_e, id) => {
     try {
       const show = await core.details(id);

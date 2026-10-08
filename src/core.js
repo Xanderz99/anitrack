@@ -295,9 +295,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       const status = ME2L[it.status] && L2ME[l?.status] !== it.status ? ME2L[it.status] : null;
       const progress = it.progress != null && it.progress !== l?.progress ? it.progress : null;
       try {
-        if (status || progress != null) await AL.saveEntry(token, { mediaId: Number(id), progress, status });
+        const saved = status || progress != null ? await AL.saveEntry(token, { mediaId: Number(id), progress, status }) : null;
         delete it.dirty;
-        S.listMap[id] = { score: 0, ...l, status: status || l?.status || 'CURRENT', progress: progress ?? l?.progress ?? 0 };
+        S.listMap[id] = { score: 0, ...l, status: status || l?.status || 'CURRENT', progress: progress ?? l?.progress ?? 0, ...(saved?.id ? { entryId: saved.id } : {}) };
         sent += 1;
       } catch (e) {
         if (isAuthError(e)) {
@@ -365,9 +365,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     const token = getToken();
     if (!token) return { pushed: false, reason: 'not-logged-in' };
     try {
-      await AL.saveEntry(token, { mediaId: id, progress, status });
+      const saved = await AL.saveEntry(token, { mediaId: id, progress, status });
       const old = S.listMap[id] || { score: 0, progress: 0 };
-      S.listMap[id] = { ...old, status: status || old.status || 'CURRENT', progress: progress ?? old.progress };
+      S.listMap[id] = { ...old, status: status || old.status || 'CURRENT', progress: progress ?? old.progress, ...(saved?.id ? { entryId: saved.id } : {}) };
       return { pushed: true };
     } catch (e) {
       if (isAuthError(e)) {
@@ -469,6 +469,33 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     };
   }
 
+  /* ---------- removing a show from your AniList list ---------- */
+  async function removeFromList(id) {
+    id = Number(id);
+    const token = getToken();
+    if (!token) return { ok: false, error: 'Log in with AniList to change your list.' };
+    try {
+      let entryId = S.listMap[id]?.entryId;
+      // Lists cached before entry ids were kept: saving with only the show id returns the existing entry.
+      if (!entryId && S.listMap[id]) entryId = (await AL.saveEntry(token, { mediaId: id }))?.id;
+      if (entryId) await AL.deleteEntry(token, entryId);
+    } catch (e) {
+      if (isAuthError(e)) {
+        clearToken();
+        return { ok: false, error: LOGIN_EXPIRED };
+      }
+      return { ok: false, error: e.message };
+    }
+    delete S.listMap[id];
+    S.list = S.list.filter((e) => e.id !== id);
+    const items = tracking.get('items');
+    delete items[id];
+    tracking.set('items', items);
+    const u = cache.get('user');
+    if (u) cache.set('user', { ...u, ts: 0 }); // relearn taste without it on the next refresh
+    return { ok: true, me: meFor(id) };
+  }
+
   /* ---------- rating ---------- */
   // Saves a 1-10 score to AniList. Ratings drive For You, so the next refresh relearns your taste.
   async function rate(id, score) {
@@ -504,7 +531,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */

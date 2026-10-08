@@ -339,3 +339,28 @@ test('details still opens offline for a loaded show, without the extras', async 
   assert.strictEqual(d.trailer, null);
   await assert.rejects(core.details(999), /Could not reach/, 'an unknown show cannot be shown offline');
 });
+
+test('removing a show deletes its AniList entry and forgets it locally', async () => {
+  const { core, AL } = setup({ list: [{ ...listEntry(1, 'CURRENT', 3), id: 555 }] });
+  const deleted = [];
+  AL.deleteEntry = async (_t, entryId) => (deleted.push(entryId), true);
+  await core.refresh({});
+  assert.strictEqual(core.meFor(1).inList, true);
+  const r = await core.removeFromList(1);
+  assert.deepStrictEqual(deleted, [555]);
+  assert.deepStrictEqual(r.me, { status: null, progress: 0, inList: false });
+  assert.ok(!core.S.list.some((e) => e.id === 1));
+});
+
+test('a show just added can be removed again (entry id comes back from saving)', async () => {
+  const { core, AL } = setup();
+  AL.saveEntry = async () => ({ id: 777 });
+  const deleted = [];
+  AL.deleteEntry = async (_t, entryId) => (deleted.push(entryId), true);
+  await core.refresh({});
+  await core.setTrack(2, { status: 'PLANNING' });
+  assert.strictEqual(core.meFor(2).inList, true);
+  await core.removeFromList(2);
+  assert.deepStrictEqual(deleted, [777]);
+  assert.strictEqual(core.meFor(2).status, null);
+});

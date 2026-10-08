@@ -198,6 +198,7 @@
     refresh,
     setTrack: core.setTrack,
     rate: core.rate,
+    removeFromList: core.removeFromList,
     async details(id) {
       try {
         const show = await core.details(id);
