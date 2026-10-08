@@ -620,12 +620,21 @@
       </div></section>`;
   }
 
+  function torboxSection() {
+    return `<section class="section">
+        <h2>TorBox / Stremio</h2>
+        <p class="note">Use TorBox through its official Stremio integration. AniTrack keeps the account and playback inside Stremio rather than handling torrent sources itself.</p>
+        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torbox">Set up TorBox in Stremio ↗</button></div><span class="hint">Install the official TorBox Stremio add-on, then use Stremio to watch content you are authorised to access.</span></div>
+      </section>`;
+  }
+
   function settingsHtml() {
     const d = S.data;
     const st = d.settings;
     if (WEB) {
       return `
       ${accountSection(d)}
+      ${torboxSection()}
       <section class="section">
         <h2>Watching on iPhone</h2>
         <p class="note">Watch opens the show on Crunchyroll. When you come back, AniTrack asks whether you finished the episode and marks it on AniList for you.</p>
@@ -637,6 +646,7 @@
     }
     return `
       ${accountSection(d)}
+      ${torboxSection()}
       <section class="section">
         <h2>Watching</h2>
         <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
@@ -1068,6 +1078,10 @@
     }
     if (act === 'playerExt') {
       window.api.playerExternal();
+      return;
+    }
+    if (act === 'torbox') {
+      window.api.openExternal('https://stremio-addons.netlify.app/torbox');
       return;
     }
     const cardEl = btn.closest('[data-id]');
