@@ -10,10 +10,12 @@ const { Store } = require('./store');
 const { powerSaveBlocker } = electron;
 const AL = require('./anilist');
 const { createCore, buildIcs } = require('./core');
+const config = require('./config');
 const { makeDubMatcher } = require('./dubs');
 
 let settings;
 let tracking;
+let cache;
 let core; // shared data + sync engine (src/core.js), created once the stores exist
 let mainWin = null;
 
@@ -33,14 +35,21 @@ function getToken() {
   try {
     return v.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(v.slice(4), 'base64')) : v.slice(4);
   } catch {
+    clearToken(); // the Keychain can no longer read it (new Mac, restored backup): log in again
     return null;
   }
 }
-const clearToken = () => settings.patch({ token: '', viewerName: '' });
+// Also forgets the AniList website session in the login window, so the next login can be someone else.
+function clearToken() {
+  settings.patch({ token: '', viewerName: '', viewerId: null, viewerAvatar: '' });
+  session.fromPartition('persist:anilist').clearStorageData().catch(() => {});
+}
+// Your own client (Settings > Advanced) wins over the one built into the app.
+const clientId = () => String(settings.get('clientId') || '').trim() || String(config.anilistClientId || '');
 
 /* ---------- what the UI gets ---------- */
 function resumeFor(id) {
-  const r = tracking.get('resume')[id];
+  const r = core.tracking.get('resume')[id];
   return r ? { ep: r.ep ?? null, time: r.time, duration: r.duration, done: !!r.done } : null;
 }
 
@@ -50,7 +59,8 @@ function payload() {
   return {
     ...core.basePayload({ resumeFor }),
     settings: { userName: settings.get('userName'), clientId: settings.get('clientId'), notify: settings.get('notify'), autoMarkPct: settings.get('autoMarkPct') },
-    auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '' },
+    auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId },
+    firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
     drm: !!components,
   };
 }
@@ -63,8 +73,8 @@ async function refresh(opts) {
 
 /* ---------- AniList login (implicit grant in a small window) ---------- */
 function loginAniList() {
-  const clientId = String(settings.get('clientId') || '').trim();
-  if (!/^\d+$/.test(clientId)) {
+  const id = clientId();
+  if (!/^\d+$/.test(id)) {
     return Promise.resolve({ ok: false, error: 'Enter your AniList client ID in Settings first (it is a number).' });
   }
   return new Promise((resolve) => {
@@ -88,8 +98,7 @@ function loginAniList() {
       try {
         const viewer = await AL.fetchViewer(token);
         setToken(token);
-        settings.set('viewerName', viewer.name);
-        if (!String(settings.get('userName') || '').trim()) settings.set('userName', viewer.name);
+        core.setViewer(viewer);
         resolve({ ok: true, name: viewer.name });
       } catch (e) {
         resolve({ ok: false, error: `AniList rejected the login: ${e.message}` });
@@ -119,7 +128,7 @@ function loginAniList() {
         resolve({ ok: false, error: 'The login window was closed before finishing.' });
       }
     });
-    win.loadURL(`https://anilist.co/api/v2/oauth/authorize?client_id=${clientId}&response_type=token`);
+    win.loadURL(`https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`);
   });
 }
 
@@ -188,7 +197,7 @@ async function openPlayer(id) {
   const show = core.enrich(raw);
   let url = show.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(show.title)}`;
   const ctx = { showId: id, key: null, marked: false, lastSave: 0, consumed: false, resumeUrl: null, resumeTime: 0 };
-  const saved = tracking.get('resume')[id];
+  const saved = core.tracking.get('resume')[id];
   if (saved && !saved.done && /^https:\/\/([\w-]+\.)*crunchyroll\.com\//.test(saved.url || '')) {
     url = saved.url; // pick up the episode you were in the middle of
     ctx.resumeUrl = saved.url;
@@ -249,7 +258,7 @@ ipcMain.on('player:tick', async (event, p) => {
   const nowMs = Date.now();
   if (nowMs - ctx.lastSave > 15000) {
     ctx.lastSave = nowMs;
-    const resume = tracking.get('resume');
+    const resume = core.tracking.get('resume');
     resume[ctx.showId] = {
       url: top,
       time: Math.floor(p.currentTime),
@@ -258,15 +267,15 @@ ipcMain.on('player:tick', async (event, p) => {
       done: p.currentTime / p.duration >= pct, // counted as watched: next time start fresh
       ts: nowMs,
     };
-    tracking.set('resume', resume);
+    core.tracking.set('resume', resume);
   }
   if (ctx.marked || p.currentTime / p.duration < pct) return;
   ctx.marked = true;
   {
-    const resume = tracking.get('resume');
+    const resume = core.tracking.get('resume');
     if (resume[ctx.showId]) {
       resume[ctx.showId].done = true;
-      tracking.set('resume', resume);
+      core.tracking.set('resume', resume);
     }
   }
   const raw = core.findRaw(ctx.showId);
@@ -407,6 +416,7 @@ function registerIpc() {
     if (typeof patch.clientId === 'string') allowed.clientId = patch.clientId.trim();
     if (typeof patch.notify === 'boolean') allowed.notify = patch.notify;
     if ([0.8, 0.9, 0.95].includes(Number(patch.autoMarkPct))) allowed.autoMarkPct = Number(patch.autoMarkPct);
+    if (typeof patch.welcomed === 'boolean') allowed.welcomed = patch.welcomed;
     settings.patch(allowed);
     if (allowed.userName !== undefined && allowed.userName !== before) {
       return refresh({ force: true });
@@ -420,9 +430,22 @@ function registerIpc() {
     }
     return result;
   });
-  ipcMain.handle('anilist:logout', () => {
+  ipcMain.handle('anilist:logout', async () => {
     clearToken();
-    return payload();
+    return refresh({});
+  });
+  ipcMain.handle('account:adopt-guest', async () => {
+    const count = core.adoptGuest();
+    return { count, data: await refresh({ force: true }) };
+  });
+  // Forgets everything on this Mac (logins, tracking, cache, the Crunchyroll session) and restarts.
+  ipcMain.handle('device:reset', async () => {
+    closePlayer();
+    for (const st of [settings, tracking, cache]) st.reset();
+    await Promise.all(['persist:anilist', 'persist:crunchyroll'].map((p) => session.fromPartition(p).clearStorageData().catch(() => {})));
+    await session.defaultSession.clearStorageData({ storages: ['localstorage'] }).catch(() => {}); // the window's own UI preferences
+    app.relaunch();
+    app.exit(0);
   });
   ipcMain.handle('watch:open', (_e, id) => openPlayer(Number(id)));
   ipcMain.handle('player:close', () => closePlayer());
@@ -487,9 +510,9 @@ app.whenReady().then(async () => {
     }
   }
   const dir = app.getPath('userData');
-  settings = new Store(dir, 'settings', { userName: 'Xanderz99', clientId: '', token: '', viewerName: '', notify: true, autoMarkPct: 0.9 });
-  tracking = new Store(dir, 'tracking', { items: {}, notified: {}, resume: {} });
-  const cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
+  settings = new Store(dir, 'settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false, notify: true, autoMarkPct: 0.9 });
+  tracking = new Store(dir, 'tracking', { accounts: {}, notified: {} });
+  cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
   core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(path.join(dir, 'dubs.json')), getToken, clearToken });
   registerIpc();
   createMainWindow();

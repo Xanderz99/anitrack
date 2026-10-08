@@ -200,3 +200,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro
 .ts { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 820px) { .hero-in { max-width: 100%; } .hero-p { display: none; } }
 .toast[hidden] { display: none; }
+
+/* ===== Accounts ===== */
+.welcome { max-width: 860px; margin: 24px auto; }
+.welcome .hero-t { font-size: 36px; margin-bottom: 8px; }
+.welcome-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
+.wopt { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.wopt h3 { margin: 0; font-size: 15px; }
+.wopt .note { margin: 0 0 10px; flex: 1; }
+.wopt form { display: flex; gap: 8px; }
+.wopt input { flex: 1; }
+.who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+details.adv { display: block; }
+details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10px; }
+.btn.danger { color: #d64545; }
+.btn.danger:hover { background: rgba(214, 69, 69, 0.12); color: #d64545; }

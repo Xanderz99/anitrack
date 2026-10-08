@@ -93,3 +93,10 @@ test('fetchSeason follows pages and fetchByIds batches by 50', async (t) => {
   assert.strictEqual(calls2[0].body.variables.ids.length, 50);
   assert.strictEqual(calls2[1].body.variables.ids.length, 10);
 });
+
+test('fetchUserList reads your own list by id with your token', async (t) => {
+  const calls = mockFetch(t, [{ json: { data: { MediaListCollection: { lists: [] } } } }]);
+  await AL.fetchUserList({ userId: 5 }, 'tok');
+  assert.deepStrictEqual(calls[0].body.variables, { id: 5 });
+  assert.strictEqual(calls[0].init.headers.Authorization, 'Bearer tok');
+});

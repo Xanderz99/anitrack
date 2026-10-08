@@ -12,7 +12,7 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 function build() {
   const files = {};
-  const mods = { anilist: 'src/anilist.js', taste: 'src/taste.js', dubs: 'src/dubs.js', core: 'src/core.js' };
+  const mods = { config: 'src/config.js', anilist: 'src/anilist.js', taste: 'src/taste.js', dubs: 'src/dubs.js', core: 'src/core.js' };
   let js = `'use strict';\n(() => {\nconst __m = {};\nconst __f = {\n  fs: (module) => { module.exports = { readFileSync() { throw new Error('no fs'); } }; },\n`;
   for (const [name, file] of Object.entries(mods)) js += `  ${name}: (module, exports, require) => {\n${read(file)}\n  },\n`;
   js += `};\nconst require = (n) => { n = n.replace(/^\\.\\//, ''); if (!__m[n]) { const module = { exports: {} }; __m[n] = module; __f[n](module, module.exports, require); } return __m[n].exports; };\nwindow.__require = require;\n})();\n`;

@@ -2,10 +2,17 @@
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // UI preferences. Keys share the anitrack: prefix so "Remove all AniTrack data" clears them too;
+  // values saved before the prefix existed are read once and moved.
   const store = {
     get(k, d) {
       try {
-        const v = localStorage.getItem(k);
+        let v = localStorage.getItem(`anitrack:ui:${k}`);
+        if (v == null && localStorage.getItem(k) != null) {
+          v = localStorage.getItem(k);
+          localStorage.setItem(`anitrack:ui:${k}`, v);
+          localStorage.removeItem(k);
+        }
         return v == null ? d : JSON.parse(v);
       } catch {
         return d;
@@ -13,7 +20,7 @@
     },
     set(k, v) {
       try {
-        localStorage.setItem(k, JSON.stringify(v));
+        localStorage.setItem(`anitrack:ui:${k}`, JSON.stringify(v));
       } catch {
         /* storage unavailable */
       }
@@ -158,7 +165,7 @@
     html += shelf('Top Picks for You', foryou.slice(0, 16), (s) => (s.why && s.why.length ? s.why.slice(0, 2).join(', ') : s.genres.slice(0, 2).join(', ')));
     html += shelf('New This Week', fresh, (s) => isNew(s));
     html += shelf('Plan to Watch', planning, (s) => (s.next ? `Ep ${s.next.episode} · ${rel(s.next.airingAt)}` : s.genres.slice(0, 2).join(', ')));
-    return html || '<div class="empty">Nothing to show yet. Check Settings for your AniList username.</div>';
+    return html || '<div class="empty">Nothing to show yet. Log in with AniList in Settings, or pick shows to track from This Season.</div>';
   }
   function tonightPicks() {
     const shows = S.data.shows;
@@ -365,7 +372,7 @@
   function tastePanel() {
     const t = S.data.taste;
     if (!t) {
-      return `<p class="note">Ranking is by popularity for now. Add your AniList username in <b>Settings</b> and shows will be ranked by how well they match what you rate highly.</p>`;
+      return `<p class="note">Ranking is by popularity for now. Log in with AniList in <b>Settings</b> (or enter a public username) and shows will be ranked by how well they match what you rate highly.</p>`;
     }
     return `<p class="note">Ranked against your AniList ratings. You tend to like <b>${esc(t.likes.join(', ') || '…')}</b>${
       t.tagLikes.length ? ` (especially ${esc(t.tagLikes.join(', '))})` : ''
@@ -397,14 +404,14 @@
 
   function listHtml() {
     const d = S.data;
-    if (!d.settings.userName) return '<div class="empty">Add your AniList username in Settings to see your list here.</div>';
-    if (!d.list.length) return `<div class="empty">No anime found for "${esc(d.settings.userName)}". Check the username in Settings and that your list is public.</div>`;
+    if (!d.account) return '<div class="empty">Log in with AniList in Settings (or enter a public username) to see your list here.</div>';
+    if (!d.list.length) return `<div class="empty">No anime on ${d.auth.loggedIn ? 'your AniList list yet' : `the list for "${esc(d.account)}". Check the username in Settings and that the list is public`}.</div>`;
     const q = S.filters.q.toLowerCase();
     const items = d.list
       .filter((e) => listStatus(e) === S.listTab && (!q || `${e.title} ${e.romaji}`.toLowerCase().includes(q)))
       .sort((a, b) => (S.listTab === 'COMPLETED' ? (b.score || 0) - (a.score || 0) : 0) || a.title.localeCompare(b.title));
     const done = d.list.filter((e) => listStatus(e) === 'COMPLETED').length;
-    const head = `<p class="note"><b>${esc(d.settings.userName)}</b> on AniList · ${d.list.length} anime, ${done} completed. Changes here are sent to AniList when you are logged in.</p>`;
+    const head = `<p class="note"><b>${esc(d.account)}</b> on AniList · ${d.list.length} anime, ${done} completed. ${d.auth.loggedIn ? 'Changes here are saved to your AniList.' : 'Log in to save changes to AniList.'}</p>`;
     return head + (items.length ? `<div class="rows">${items.map(listRow).join('')}</div>` : '<div class="empty">Nothing here.</div>');
   }
 
@@ -417,6 +424,10 @@
     }
     if (!S.data || (S.data.loading && S.view !== 'settings')) {
       el.innerHTML = '<div class="empty">Loading this season from AniList…</div>';
+      return;
+    }
+    if (S.data.firstRun && S.view !== 'settings') {
+      el.innerHTML = welcomeHtml();
       return;
     }
     if (S.view === 'settings') {
@@ -476,41 +487,89 @@
     const n = `${d.pending} change${d.pending > 1 ? 's' : ''}`;
     return d.auth.loggedIn
       ? `<span>${n} not sent to AniList yet.</span> <button class="btn small" data-refresh>Sync now</button>`
-      : `<span>${n} saved here only. Log in to send ${d.pending > 1 ? 'them' : 'it'} to AniList.</span>`;
+      : `<span>${n} saved on this device only. Log in to add ${d.pending > 1 ? 'them' : 'it'} to your AniList.</span>`;
+  }
+
+  // Your AniList account is your AniTrack account: progress lives on AniList, so it follows you to any
+  // device. Without one, the app still works from a public username or entirely on this device.
+  function accountSection(d) {
+    const st = d.settings;
+    const a = d.auth;
+    const redirect = WEB ? d.redirectUrl : 'http://localhost/anitrack';
+    const clientField = `<div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" inputmode="numeric" value="${esc(st.clientId)}" placeholder="e.g. 12345"><span class="hint">${
+      a.builtInClient
+        ? 'Optional. Only if you want to log in through your own AniList API client instead of the built-in one.'
+        : 'Needed once to log in: create a free client at anilist.co/settings/developer and paste its ID here.'
+    } Its redirect URL must be <b>${esc(redirect)}</b>.</span></div>`;
+    const advanced = a.builtInClient ? `<details class="field adv"><summary>Advanced</summary>${clientField}</details>` : clientField;
+    if (a.loggedIn) {
+      const guest = d.guestItems
+        ? `<div class="field"><label>This device</label><div><span>${d.guestItems} show${d.guestItems > 1 ? 's' : ''} tracked here before you logged in.</span> <button class="btn small" data-act="adoptGuest">Add to my AniList</button></div></div>`
+        : '';
+      return `<section class="section">
+        <h2>Account</h2>
+        <div class="field"><label>AniList</label><div class="who">${a.avatar ? `<img class="avatar" src="${esc(a.avatar)}" alt="">` : ''}<span>Logged in as <b>${esc(a.name)}</b></span> <button class="btn small" data-act="logout">Log out</button></div>
+          <span class="hint">Your list, ratings and episode progress are saved on your AniList account, so they stay in step on every device you log in on.${WEB ? ' To switch to a different AniList account, also log out on anilist.co.' : ''}</span></div>
+        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
+        ${guest}${advanced}
+      </section>`;
+    }
+    const loginBtn = a.canLogin
+      ? '<button class="btn primary small" data-act="login">Log in with AniList</button>'
+      : '<span class="hint">Enter a client ID below to log in.</span>';
+    const paste = WEB && a.canLogin
+      ? `<details class="field adv"><summary>Login not coming back?</summary><div class="field"><label for="tokenPaste">Paste a code</label><input type="text" id="tokenPaste" placeholder="Long code from AniList" autocapitalize="off" autocorrect="off"><span class="hint">If logging in opens Safari and never returns to the Home Screen app, use your own client (Advanced) with the redirect URL <b>https://anilist.co/api/v2/oauth/pin</b>, tap Log in, then paste the code AniList shows here.</span></div></details>`
+      : '';
+    return `<section class="section">
+        <h2>Account</h2>
+        <div class="field"><label>AniList</label><div>${loginBtn}</div>
+          <span class="hint">Log in to save your progress to your AniList account and sync it across devices. No AniList account? Sign up free at anilist.co.</span></div>
+        <div class="field"><label for="userName">Or just view</label><input type="text" id="userName" value="${esc(st.userName)}" placeholder="A public AniList username" autocapitalize="off" autocorrect="off"><span class="hint">Learns your taste from a public list without logging in. Anything you track is then kept on this device only.</span></div>
+        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
+        ${a.builtInClient ? `${advanced}${paste}` : `${clientField}${paste}`}
+      </section>`;
+  }
+
+  function deviceSection() {
+    return `<section class="section">
+        <h2>Privacy</h2>
+        <p class="note">AniTrack has no servers. It talks only to AniList${WEB ? '' : ' and Crunchyroll'}, and keeps everything else on this device.</p>
+        <div class="field"><label>This device</label><div><button class="btn small danger" data-act="resetDevice">Remove all AniTrack data from this ${WEB ? 'browser' : 'Mac'}</button></div><span class="hint">Logs out and clears local tracking and caches. Useful on a shared device. Nothing on AniList is deleted.</span></div>
+      </section>`;
+  }
+
+  function welcomeHtml() {
+    const a = S.data.auth;
+    return `<section class="welcome">
+      <h1 class="hero-t">Welcome to AniTrack</h1>
+      <p class="note">Keep up with this season's anime: what airs when, what is ready to watch, and picks ranked by your taste.</p>
+      <div class="welcome-opts">
+        <div class="wopt"><h3>Log in with AniList</h3><p class="note">Recommended. Your progress is saved to your AniList account and syncs between devices. Free to sign up at anilist.co.</p>
+          ${a.canLogin ? '<button class="btn primary" data-act="login">Log in with AniList</button>' : '<button class="btn primary" data-nav="settings">Set up login</button>'}</div>
+        <div class="wopt"><h3>Use a public username</h3><p class="note">Learn your taste from a public AniList list without logging in.</p>
+          <form data-form="welcomeName"><input type="text" name="u" placeholder="AniList username" autocapitalize="off" autocorrect="off" aria-label="AniList username"> <button class="btn">Continue</button></form></div>
+        <div class="wopt"><h3>Just look around</h3><p class="note">Browse the season with nothing saved anywhere but this device.</p>
+          <button class="btn" data-act="welcomeSkip">Continue without an account</button></div>
+      </div></section>`;
   }
 
   function settingsHtml() {
     const d = S.data;
     const st = d.settings;
-    const login = d.auth.loggedIn
-      ? `<span>Logged in as <b>${esc(d.auth.name)}</b></span> <button class="btn small" data-act="logout">Log out</button>`
-      : `<button class="btn primary small" data-act="login">Log in with AniList</button>`;
     if (WEB) {
       return `
-      <section class="section">
-        <h2>AniList</h2>
-        <div class="field"><label for="userName">Username</label><input type="text" id="userName" value="${esc(st.userName)}" placeholder="Your AniList username" autocapitalize="off" autocorrect="off"><span class="hint">Used to learn your taste and see what you already watch. Your list must be public.</span></div>
-        <div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" inputmode="numeric" value="${esc(st.clientId)}" placeholder="e.g. 12345"><span class="hint">Lets the app update your list. At anilist.co/settings/developer create a client with the redirect URL <b>${esc(d.redirectUrl)}</b> and paste its ID here. This is a separate client from the Mac app's.</span></div>
-        <div class="field"><label>Account</label><div>${login}</div></div>
-        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
-        ${d.auth.loggedIn ? '' : `<div class="field"><label for="tokenPaste">Or paste a token</label><input type="text" id="tokenPaste" placeholder="Long code from AniList" autocapitalize="off" autocorrect="off"><span class="hint">If logging in opens Safari and never comes back, set the client's redirect URL to <b>https://anilist.co/api/v2/oauth/pin</b> instead, tap Log in, copy the code AniList shows and paste it here.</span></div>`}
-      </section>
+      ${accountSection(d)}
       <section class="section">
         <h2>Watching on iPhone</h2>
         <p class="note">Watch opens the show on Crunchyroll. When you come back, AniTrack asks whether you finished the episode and marks it on AniList for you.</p>
         <p class="note">For a reminder when episodes air, use <b>Export calendar</b> on My Shows and choose Add All.</p>
       </section>
       <section class="section"><h2>Season</h2><div class="season"><button class="btn small" data-season="-1" aria-label="Previous season">‹</button><b>${esc(`${d.season.season[0]}${d.season.season.slice(1).toLowerCase()} ${d.season.year}`)}</b><button class="btn small" data-season="1" aria-label="Next season">›</button></div>
-        <p class="note">${d.updatedAt ? `Updated ${esc(timeFmt.format(new Date(d.updatedAt)))}` : ''} <button class="btn small" data-refresh>Refresh now</button></p></section>`;
+        <p class="note">${d.updatedAt ? `Updated ${esc(timeFmt.format(new Date(d.updatedAt)))}` : ''} <button class="btn small" data-refresh>Refresh now</button></p></section>
+      ${deviceSection()}`;
     }
     return `
-      <section class="section">
-        <h2>AniList</h2>
-        <div class="field"><label for="userName">Username</label><input type="text" id="userName" value="${esc(st.userName)}" placeholder="Your AniList username"><span class="hint">Used to learn your taste and see what you already watch. Your list must be public.</span></div>
-        <div class="field"><label for="clientId">Client ID</label><input type="text" id="clientId" value="${esc(st.clientId)}" placeholder="e.g. 12345"><span class="hint">Needed once so the app can update your list. Create a free app at anilist.co/settings/developer and set its redirect URL to <b>http://localhost/anitrack</b>. Paste the ID it shows here.</span></div>
-        <div class="field"><label>Account</label><div>${login}</div></div>
-        <div class="field"><label>Sync</label><div>${syncField(d)}</div></div>
-      </section>
+      ${accountSection(d)}
       <section class="section">
         <h2>Watching</h2>
         <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
@@ -527,7 +586,8 @@
         <h2>More</h2>
         <div class="field"><label>Menu bar</label><div>The next episode countdown for your shows shows in the menu bar. Click it to open AniTrack.</div></div>
         <div class="field"><label>Shortcuts</label><div class="keys"><span><kbd>⌘1</kbd>–<kbd>⌘8</kbd> switch view</span><span><kbd>/</kbd> or <kbd>⌘F</kbd> search</span><span><kbd>Esc</kbd> clear search / close player</span></div></div>
-      </section>`;
+      </section>
+      ${deviceSection()}`;
   }
 
   function render() {
@@ -549,6 +609,18 @@
       S.loadingMsg = null;
     }
     render();
+  }
+
+  async function adoptGuest() {
+    const r = await window.api.adoptGuest();
+    S.data = r.data;
+    toast(r.count ? `Added ${r.count} show${r.count > 1 ? 's' : ''} to your AniList` : 'Nothing new to add');
+    render();
+  }
+  // Right after logging in: offer to send what was tracked here while logged out.
+  function offerGuest() {
+    const n = S.data?.guestItems;
+    if (n) setTimeout(() => toast(`You tracked ${n} show${n > 1 ? 's' : ''} on this device before logging in. Add ${n > 1 ? 'them' : 'it'} to your AniList?`, { label: 'Add', fn: adoptGuest }), 1500);
   }
 
   /* ---------- toast ---------- */
@@ -671,12 +743,30 @@
       if (r.ok) {
         S.data = r.data;
         toast(`Logged in as ${r.name}`);
+        offerGuest();
       } else toast(r.error);
       render();
       return;
     }
     if (act === 'logout') {
       S.data = await window.api.logout();
+      toast('Logged out. Anything you track now stays on this device.');
+      render();
+      return;
+    }
+    if (act === 'adoptGuest') {
+      adoptGuest();
+      return;
+    }
+    if (act === 'resetDevice') {
+      if (!window.confirm('Remove all AniTrack data from this device? You will be logged out. Your AniList account is not affected.')) return;
+      await window.api.resetDevice();
+      return;
+    }
+    if (act === 'welcomeSkip') {
+      S.data = await window.api.saveSettings({ welcomed: true });
+      S.view = 'season';
+      store.set('view', S.view);
       render();
       return;
     }
@@ -732,6 +822,7 @@
       const r = await window.api.loginWithToken(t.value);
       S.data = r.data;
       toast(r.msg);
+      if (r.ok) offerGuest();
       render();
       return;
     }
@@ -740,6 +831,20 @@
     else return;
     S.data = await window.api.saveSettings(patch);
     toast('Saved');
+    render();
+  });
+
+  document.addEventListener('submit', async (e) => {
+    const form = e.target.closest('[data-form="welcomeName"]');
+    if (!form) return;
+    e.preventDefault();
+    const u = form.elements.u.value.trim();
+    if (!u) return;
+    toast(`Reading ${u}'s list…`);
+    S.data = await window.api.saveSettings({ userName: u, welcomed: true });
+    S.view = 'foryou';
+    store.set('view', S.view);
+    toast(S.data.errors?.user || `Ranked by ${u}'s taste`);
     render();
   });
 
@@ -800,7 +905,7 @@
     S.data = d;
     render();
   });
-  window.api.on('toast', toast);
+  window.api.on('toast', (t) => (typeof t === 'string' ? toast(t) : toast(t.msg, t.action)));
   window.api.on('player', (p) => {
     S.player = p;
     render();

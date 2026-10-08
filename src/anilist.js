@@ -110,14 +110,18 @@ async function fetchByIds(ids) {
   return out;
 }
 
-const USER_Q = `query($u:String){
-  MediaListCollection(userName:$u, type:ANIME){
+const USER_Q = `query($u:String,$id:Int){
+  MediaListCollection(userName:$u, userId:$id, type:ANIME){
     lists{ entries{ status score(format:POINT_10) progress media{ id genres tags{ name rank } studios(isMain:true){ nodes{ name } } title{ romaji english } coverImage{ medium color } episodes format siteUrl } } }
   }
 }`;
 
-async function fetchUserList(userName) {
-  const data = await gql(USER_Q, { u: userName });
+// who: { userId } (with that account's token, so private lists work) or { userName } for a public list.
+// A plain string is treated as a username.
+async function fetchUserList(who, token) {
+  const w = typeof who === 'string' ? { userName: who } : who;
+  const vars = w.userId ? { id: w.userId } : { u: w.userName };
+  const data = await gql(USER_Q, vars, token || undefined);
   const seen = new Set();
   const entries = [];
   for (const list of data.MediaListCollection?.lists || []) {
@@ -131,7 +135,7 @@ async function fetchUserList(userName) {
 }
 
 async function fetchViewer(token) {
-  const data = await gql('query { Viewer { id name } }', {}, token);
+  const data = await gql('query { Viewer { id name avatar{ medium } } }', {}, token);
   return data.Viewer;
 }
 

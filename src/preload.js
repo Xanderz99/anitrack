@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: (patch) => invoke('settings:save', patch),
   login: () => invoke('anilist:login'),
   logout: () => invoke('anilist:logout'),
+  adoptGuest: () => invoke('account:adopt-guest'),
+  resetDevice: () => invoke('device:reset'),
   watch: (id) => invoke('watch:open', id),
   closePlayer: () => invoke('player:close'),
   exportCalendar: () => invoke('calendar:export'),

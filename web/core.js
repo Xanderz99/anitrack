@@ -5,12 +5,19 @@
   const AL = require('./anilist');
   const { createCore, buildIcs } = require('./core');
   const { makeDubMatcher } = require('./dubs');
+  const config = require('./config');
 
   /* ---------- storage (localStorage, one key per store) ---------- */
+  const stores = [];
   class Store {
     constructor(name, defaults) {
       this.key = `anitrack:${name}`;
-      this.data = JSON.parse(JSON.stringify(defaults)); // deep copy: callers mutate nested objects in place
+      this.defaults = JSON.stringify(defaults);
+      this.load();
+      stores.push(this);
+    }
+    load() {
+      this.data = JSON.parse(this.defaults); // deep copy: callers mutate nested objects in place
       try {
         Object.assign(this.data, JSON.parse(localStorage.getItem(this.key) || '{}'));
       } catch {
@@ -29,28 +36,42 @@
       this.save();
     }
     save() {
+      const body = JSON.stringify(this.data);
       try {
-        localStorage.setItem(this.key, JSON.stringify(this.data));
+        localStorage.setItem(this.key, body);
       } catch {
-        // Storage full: drop cached seasons (they can be fetched again) and retry once.
-        if (this.data.seasons) {
-          this.data.seasons = {};
-          try {
-            localStorage.setItem(this.key, JSON.stringify(this.data));
-          } catch {
-            /* give up quietly */
-          }
+        // Storage full. Cached AniList data can be fetched again, so it goes first; your tracking and
+        // login must still save. (Storage that is unavailable altogether just stays in memory.)
+        freeCache();
+        try {
+          localStorage.setItem(this.key, body);
+        } catch {
+          console.warn('Could not save', this.key);
         }
       }
     }
   }
 
-  const settings = new Store('settings', { userName: 'Xanderz99', clientId: '', token: '', viewerName: '' });
-  const tracking = new Store('tracking', { items: {}, notified: {} });
+  const settings = new Store('settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false });
+  const tracking = new Store('tracking', { accounts: {}, notified: {} });
   const cache = new Store('cache', { seasons: {}, user: null, extra: null });
+  function freeCache() {
+    cache.data = JSON.parse(cache.defaults);
+    try {
+      localStorage.removeItem(cache.key);
+    } catch {
+      /* nothing to free */
+    }
+  }
   const getToken = () => settings.get('token') || null;
-  const clearToken = () => settings.patch({ token: '', viewerName: '' });
-  const core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(null), getToken, clearToken });
+  const clearToken = () => settings.patch({ token: '', viewerName: '', viewerId: null, viewerAvatar: '' });
+  // Phones give a web app only a few MB, so keep fewer seasons than the Mac does.
+  const core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(null), getToken, clearToken, seasonsKept: 2 });
+
+  // The app's built-in AniList client only redirects to the official address; copies hosted elsewhere
+  // (or opened from a file) need their own client ID.
+  const onOfficialSite = () => location.origin + location.pathname === config.webUrl;
+  const clientId = () => String(settings.get('clientId') || '').trim() || (onOfficialSite() ? String(config.anilistClientId || '') : '');
 
   const listeners = { data: [], toast: [], player: [] };
   const emit = (ch, d) => (listeners[ch] || []).forEach((cb) => cb(d));
@@ -62,7 +83,8 @@
       platform: 'web',
       redirectUrl: redirectUrl(),
       settings: { userName: settings.get('userName'), clientId: settings.get('clientId') },
-      auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '' },
+      auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId && onOfficialSite() },
+      firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
       drm: false,
     };
   }
@@ -73,22 +95,47 @@
   }
 
   /* ---------- login: AniList sends us back to this page with #access_token=… ---------- */
+  const PENDING_LOGIN = 'anitrack:loginStarted';
+  // Returns a message for the UI, or { confirm } when the token arrived without this app asking for it
+  // (a link someone else made could otherwise log you into their account).
   async function finishLoginFromHash() {
     const m = /[#&]access_token=([^&]+)/.exec(location.hash);
     if (!m) return null;
     history.replaceState(null, '', location.pathname + location.search); // keep the token out of the address bar
-    return useToken(decodeURIComponent(m[1]));
+    const token = decodeURIComponent(m[1]);
+    let started = 0;
+    try {
+      started = Number(localStorage.getItem(PENDING_LOGIN)) || 0;
+      localStorage.removeItem(PENDING_LOGIN);
+    } catch {
+      /* storage unavailable */
+    }
+    if (Date.now() - started < 30 * 60e3) return useToken(token);
+    try {
+      const viewer = await AL.fetchViewer(token);
+      return { confirm: viewer.name, token };
+    } catch (e) {
+      return `AniList rejected the login: ${e.message}`;
+    }
   }
   async function useToken(token) {
     try {
       const viewer = await AL.fetchViewer(token);
-      settings.patch({ token, viewerName: viewer.name });
-      if (!String(settings.get('userName') || '').trim()) settings.set('userName', viewer.name);
-      cache.set('user', null);
+      settings.patch({ token });
+      core.setViewer(viewer);
       return `Logged in as ${viewer.name}`;
     } catch (e) {
       return `AniList rejected the login: ${e.message}`;
     }
+  }
+  // After a login: offer to send what you tracked here while logged out to your AniList.
+  function guestOffer() {
+    const n = core.basePayload().guestItems;
+    if (!n) return;
+    emit('toast', {
+      msg: `You tracked ${n} show${n > 1 ? 's' : ''} on this device before logging in. Add ${n > 1 ? 'them' : 'it'} to your AniList?`,
+      action: { label: 'Add', fn: () => api.adoptGuest().then((r) => emit('data', r.data)) },
+    });
   }
 
   /* ---------- calendar: Safari offers "Add to Calendar" for .ics files ---------- */
@@ -106,11 +153,19 @@
 
   /* ---------- the api ---------- */
   let booted = false;
-  window.api = {
+  const api = {
     platform: 'web',
     async init() {
-      const loginMsg = await finishLoginFromHash();
-      if (loginMsg) setTimeout(() => emit('toast', loginMsg), 300);
+      navigator.storage?.persist?.().catch(() => {}); // asks Safari not to clear this app's data
+      let loginMsg = await finishLoginFromHash();
+      if (loginMsg && loginMsg.confirm) {
+        const { confirm, token } = loginMsg;
+        loginMsg = null;
+        setTimeout(() => emit('toast', { msg: `Log in to AniTrack as ${confirm}?`, action: { label: 'Log in', fn: () => api.loginWithToken(token).then((r) => (emit('data', r.data), emit('toast', r.msg), setTimeout(guestOffer, 2500))) } }), 300);
+      } else if (loginMsg) {
+        setTimeout(() => emit('toast', loginMsg), 300);
+        setTimeout(guestOffer, 2500);
+      }
       core.loadFromCache();
       if (!booted) {
         booted = true;
@@ -118,6 +173,13 @@
         // Coming back to the app after a while: refresh quietly.
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'visible' && Date.now() - core.S.updatedAt > 15 * 60e3) refresh({}).then((p) => emit('data', p)).catch(() => {});
+        });
+        // Another tab changed something: pick it up instead of overwriting it on the next save.
+        window.addEventListener('storage', (e) => {
+          const st = stores.find((x) => x.key === e.key);
+          if (!st) return;
+          st.load();
+          if (st !== cache) refresh({}).then((p) => emit('data', p)).catch(() => {});
         });
       }
       return { ...payload(), loading: core.S.raw.length === 0 };
@@ -129,6 +191,7 @@
       const allowed = {};
       if (typeof patch.userName === 'string') allowed.userName = patch.userName.trim();
       if (typeof patch.clientId === 'string') allowed.clientId = patch.clientId.trim();
+      if (typeof patch.welcomed === 'boolean') allowed.welcomed = patch.welcomed;
       settings.patch(allowed);
       if (allowed.userName !== undefined && allowed.userName !== before) {
         return refresh({ force: true });
@@ -136,9 +199,14 @@
       return payload();
     },
     async login() {
-      const clientId = String(settings.get('clientId') || '').trim();
-      if (!/^\d+$/.test(clientId)) return { ok: false, error: 'Enter your AniList client ID in Settings first (it is a number).' };
-      location.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${clientId}&response_type=token`;
+      const id = clientId();
+      if (!/^\d+$/.test(id)) return { ok: false, error: 'Enter your AniList client ID in Settings first (it is a number).' };
+      try {
+        localStorage.setItem(PENDING_LOGIN, String(Date.now()));
+      } catch {
+        /* the confirm prompt covers this */
+      }
+      location.href = `https://anilist.co/api/v2/oauth/authorize?client_id=${id}&response_type=token`;
       return new Promise(() => {}); // the page is leaving
     },
     // Fallback when the redirect lands in Safari instead of the Home Screen app: AniList's "pin" page shows the token to copy.
@@ -149,7 +217,21 @@
     },
     async logout() {
       clearToken();
-      return payload();
+      return refresh({});
+    },
+    async adoptGuest() {
+      const count = core.adoptGuest();
+      return { count, data: await refresh({ force: true }) };
+    },
+    // Forgets everything this browser stored for AniTrack (for shared devices).
+    async resetDevice() {
+      try {
+        for (const k of Object.keys(localStorage)) if (k.startsWith('anitrack:')) localStorage.removeItem(k);
+      } catch {
+        /* nothing stored */
+      }
+      location.reload();
+      return new Promise(() => {});
     },
     async watch(id) {
       id = Number(id);
@@ -173,6 +255,8 @@
       return () => (listeners[ch] = listeners[ch].filter((x) => x !== cb));
     },
   };
+
+  window.api = api;
 
   // Hourly refresh while the app stays open.
   setInterval(() => refresh({}).then((p) => emit('data', p)).catch(() => {}), 3600e3);

@@ -24,9 +24,14 @@ const listEntry = (id, status, progress, score = 0) => ({ status, score, progres
 // A fake AniList: season shows, a user list, and a log of saved entries.
 function setup({ token = 'tok', shows = [media(1), media(2)], list = [], saveError = null, now = () => new Date(2026, 9, 8).getTime() } = {}) {
   const saved = [];
+  const listReads = [];
   const AL = {
     fetchSeason: async () => shows,
-    fetchUserList: async () => list,
+    fetchViewer: async () => ({ id: 7, name: 'me' }),
+    fetchUserList: async (w, tok) => {
+      listReads.push({ ...w, token: tok });
+      return list;
+    },
     fetchByIds: async (ids) => ids.map((id) => media(id)),
     saveEntry: async (_tok, e) => {
       if (saveError) throw saveError;
@@ -34,8 +39,8 @@ function setup({ token = 'tok', shows = [media(1), media(2)], list = [], saveErr
       return {};
     },
   };
-  const settings = new MemStore({ userName: 'me', token });
-  const tracking = new MemStore({ items: {} });
+  const settings = new MemStore({ userName: token ? '' : 'me', token, viewerId: token ? 7 : null, viewerName: token ? 'me' : '' });
+  const tracking = new MemStore({ accounts: {}, notified: {} });
   const cache = new MemStore({ seasons: {}, user: null, extra: null });
   const core = createCore({
     AL,
@@ -43,10 +48,10 @@ function setup({ token = 'tok', shows = [media(1), media(2)], list = [], saveErr
     tracking,
     cache,
     getToken: () => settings.get('token') || null,
-    clearToken: () => settings.patch({ token: '' }),
+    clearToken: () => settings.patch({ token: '', viewerId: null, viewerName: '' }),
     now,
   });
-  return { core, AL, settings, tracking, cache, saved };
+  return { core, AL, settings, tracking, cache, saved, listReads };
 }
 
 test('progress starts watching, reaching the total completes, going back reopens', async () => {
@@ -79,22 +84,87 @@ test('"Not interested" stays local', async () => {
   const r = await core.setTrack(2, { status: 'SKIP' });
   assert.strictEqual(r.reason, 'local-only');
   assert.strictEqual(saved.length, 0);
-  assert.ok(!tracking.get('items')[2].dirty);
+  assert.ok(!core.tracking.get('items')[2].dirty);
 });
 
-test('changes made while logged out are sent after logging in', async () => {
-  const { core, settings, tracking, saved } = setup({ token: '' });
+test('logged-out tracking stays on the device until you choose to add it to your AniList', async () => {
+  const { core, settings, saved } = setup({ token: '' });
   await core.refresh({});
   const r = await core.setTrack(1, { progress: 4 });
   assert.strictEqual(r.reason, 'not-logged-in');
-  assert.ok(tracking.get('items')[1].dirty);
-  assert.strictEqual(core.basePayload().pending, 1);
+  assert.ok(core.tracking.get('items')[1].dirty);
+  await core.setTrack(2, { status: 'SKIP' });
+
+  // Log in: the account starts from its own (empty) space, and nothing is sent by itself.
+  settings.patch({ token: 'tok' });
+  core.setViewer({ id: 7, name: 'me' });
+  await core.refresh({ force: true });
+  assert.deepStrictEqual(saved, []);
+  assert.deepStrictEqual(core.meFor(1), { status: null, progress: 0, inList: false });
+  assert.strictEqual(core.basePayload().guestItems, 2);
+
+  assert.strictEqual(core.adoptGuest(), 2);
+  await core.refresh({ force: true });
+  assert.deepStrictEqual(saved, [{ mediaId: 1, progress: 4, status: 'CURRENT' }], '"Not interested" is adopted but stays local');
+  assert.strictEqual(core.meFor(2).status, 'SKIP');
+  assert.strictEqual(core.basePayload().pending, 0);
+  assert.strictEqual(core.basePayload().guestItems, 0);
+});
+
+test("two accounts on one device never see or push each other's changes", async () => {
+  const { core, settings, saved, AL } = setup();
+  await core.refresh({});
+  AL.saveEntry = async () => {
+    throw new Error('offline');
+  };
+  await core.setTrack(1, { progress: 3 }); // account 7, left unsynced
+  AL.saveEntry = async (_t, e) => saved.push(e);
+
+  settings.patch({ token: 'tok2' });
+  core.setViewer({ id: 8, name: 'other' });
+  await core.refresh({ force: true });
+  assert.deepStrictEqual(saved, [], "account 8 does not send account 7's change");
+  assert.strictEqual(core.meFor(1).progress, 0);
 
   settings.patch({ token: 'tok' });
+  core.setViewer({ id: 7, name: 'me' });
   await core.refresh({ force: true });
-  assert.deepStrictEqual(saved, [{ mediaId: 1, progress: 4, status: 'CURRENT' }]);
-  assert.ok(!tracking.get('items')[1].dirty);
-  assert.strictEqual(core.basePayload().pending, 0);
+  assert.deepStrictEqual(saved, [{ mediaId: 1, progress: 3, status: 'CURRENT' }], 'account 7 gets it back and syncs it');
+});
+
+test('logged in, your own list is read by account id with your token (private lists work)', async () => {
+  const { core, listReads } = setup();
+  await core.refresh({});
+  assert.deepStrictEqual(listReads, [{ userId: 7, token: 'tok' }]);
+  assert.strictEqual(core.basePayload().account, 'me');
+
+  const guest = setup({ token: '' });
+  await guest.core.refresh({});
+  assert.deepStrictEqual(guest.listReads, [{ userName: 'me', token: null }]);
+});
+
+test('data from before accounts moves to whoever was using the app', async () => {
+  const settings = new MemStore({ token: 'tok', viewerName: 'me', viewerId: null, userName: 'me' });
+  const tracking = new MemStore({ items: { 5: { status: 'WATCHING', progress: 2 } }, resume: { 5: { time: 60 } }, notified: { x: 1 } });
+  const AL = { fetchSeason: async () => [], fetchUserList: async () => [], fetchByIds: async () => [], fetchViewer: async () => ({ id: 42, name: 'me' }) };
+  const core = createCore({ AL, settings, tracking, cache: new MemStore({ seasons: {}, user: null, extra: null }), getToken: () => settings.get('token'), clearToken() {} });
+  assert.strictEqual(tracking.get('items'), undefined);
+  assert.deepStrictEqual(tracking.get('notified'), { x: 1 }, 'device-wide data stays');
+  await core.refresh({}); // learns the account id
+  assert.strictEqual(core.accountKey(), 'anilist:42');
+  assert.deepStrictEqual(core.meFor(5), { status: 'WATCHING', progress: 2, inList: false });
+  assert.deepStrictEqual(core.tracking.get('resume'), { 5: { time: 60 } });
+  assert.ok(!tracking.get('accounts').legacy);
+});
+
+test('an expired token found while reading your list logs you out instead of erroring forever', async () => {
+  const { core, settings, AL } = setup();
+  AL.fetchUserList = async () => {
+    throw Object.assign(new Error('Invalid token'), { status: 400 });
+  };
+  await core.refresh({});
+  assert.strictEqual(settings.get('token'), '');
+  assert.match(core.S.errors.sync, /login expired/);
 });
 
 test('a failed send stays pending, is retried on refresh, and says why meanwhile', async () => {
@@ -106,15 +176,15 @@ test('a failed send stays pending, is retried on refresh, and says why meanwhile
   };
   const r = await core.setTrack(1, { progress: 2 });
   assert.match(r.error, /503/);
-  assert.ok(tracking.get('items')[1].dirty);
+  assert.ok(core.tracking.get('items')[1].dirty);
 
   await core.refresh({ force: true });
-  assert.ok(tracking.get('items')[1].dirty);
+  assert.ok(core.tracking.get('items')[1].dirty);
   assert.match(core.S.errors.sync, /will be retried/);
 
   AL.saveEntry = working;
   await core.refresh({ force: true });
-  assert.ok(!tracking.get('items')[1].dirty);
+  assert.ok(!core.tracking.get('items')[1].dirty);
   assert.deepStrictEqual(saved, [{ mediaId: 1, progress: 2, status: 'CURRENT' }]);
   assert.strictEqual(core.S.errors.sync, undefined);
 });
@@ -130,7 +200,7 @@ test('an expired login is cleared instead of failing forever', async () => {
 
 test('AniList wins for synced items; a higher remote episode count always wins', async () => {
   const { core, tracking } = setup({ token: '', list: [listEntry(1, 'CURRENT', 5), listEntry(2, 'PAUSED', 2)] });
-  tracking.set('items', { 1: { status: 'WATCHING', progress: 3 }, 2: { status: 'WATCHING', progress: 1, dirty: true } });
+  core.tracking.set('items', { 1: { status: 'WATCHING', progress: 3 }, 2: { status: 'WATCHING', progress: 1, dirty: true } });
   await core.refresh({});
   assert.deepStrictEqual(core.meFor(1), { status: 'WATCHING', progress: 5, inList: true });
   assert.deepStrictEqual(core.meFor(2), { status: 'WATCHING', progress: 2, inList: true }, 'unsynced status kept, higher remote progress taken');

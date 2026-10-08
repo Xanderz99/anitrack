@@ -33,12 +33,99 @@ function compactList(entries) {
   }));
 }
 
-function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getToken, clearToken, now = Date.now }) {
+// Local tracking is kept per account, so two people sharing a device (or one person with two AniList
+// accounts) never see, or push, each other's changes. Logged out, everything goes to the "guest" space.
+// Older installs kept one flat { items, resume }; that moves into the space of whoever is using the app.
+function migrateTracking(store, loggedIn) {
+  if (!store.get('items') && !store.get('resume')) return;
+  const accounts = store.get('accounts') || {};
+  const key = loggedIn ? 'legacy' : 'guest';
+  if (!accounts[key]) accounts[key] = { items: store.get('items') || {}, resume: store.get('resume') || {} };
+  store.patch({ accounts, items: undefined, resume: undefined });
+}
+
+function createCore({ AL, settings, tracking: store, cache, dubMatch = () => null, getToken, clearToken, now = Date.now, seasonsKept = SEASONS_KEPT }) {
   // Everything the UI shows is derived from this.
   const S = { raw: [], extra: [], list: [], listMap: {}, taste: null, season: seasonFor(new Date(now())), updatedAt: 0, errors: {} };
   const allRaw = () => [...S.raw, ...S.extra]; // this season plus shows you watch from earlier seasons
   const findRaw = (id) => allRaw().find((r) => r.id === id);
   const userName = () => String(settings.get('userName') || '').trim();
+  const loggedIn = () => !!settings.get('token'); // presence only: the Mac keeps it encrypted
+
+  if (!store.get('accounts')) store.set('accounts', {});
+  migrateTracking(store, loggedIn());
+
+  /* ---------- whose data this is ---------- */
+  function accountKey() {
+    if (!loggedIn()) return 'guest';
+    const id = settings.get('viewerId');
+    return id ? `anilist:${id}` : 'legacy'; // logged in before AniTrack stored account ids
+  }
+  function space(key = accountKey()) {
+    const accounts = store.get('accounts');
+    if (!accounts[key]) accounts[key] = { items: {}, resume: {} };
+    return accounts[key];
+  }
+  // Same get/set shape as a store, scoped to the current account. Everything below uses this.
+  const tracking = {
+    get: (k) => space()[k] || (space()[k] = {}),
+    set(k, v) {
+      space()[k] = v;
+      store.set('accounts', store.get('accounts'));
+    },
+  };
+
+  // The AniList list this app reads: your own when logged in (private lists work too), otherwise
+  // the public list of whatever username you entered.
+  function who() {
+    const id = settings.get('viewerId');
+    if (loggedIn() && id) return { key: `id:${id}`, userId: id, label: settings.get('viewerName') || 'your account' };
+    const name = userName();
+    return !loggedIn() && name ? { key: `name:${name.toLowerCase()}`, userName: name, label: name } : null;
+  }
+
+  // Called after a login. Data from a login made before ids were stored becomes this account's.
+  function setViewer(viewer) {
+    settings.patch({ viewerId: viewer.id, viewerName: viewer.name, viewerAvatar: viewer.avatar?.medium || '' });
+    const accounts = store.get('accounts');
+    if (accounts.legacy) {
+      const key = `anilist:${viewer.id}`;
+      if (!accounts[key]) accounts[key] = accounts.legacy;
+      delete accounts.legacy;
+      store.set('accounts', accounts);
+    }
+  }
+
+  async function ensureViewer(errors) {
+    const token = getToken();
+    if (!token || settings.get('viewerId')) return;
+    try {
+      setViewer(await AL.fetchViewer(token));
+    } catch (e) {
+      if (isAuthError(e)) {
+        clearToken();
+        errors.sync = LOGIN_EXPIRED;
+      }
+    }
+  }
+
+  // Shows you tracked logged out on this device, before logging in.
+  const guestCount = () => (loggedIn() ? Object.keys(store.get('accounts').guest?.items || {}).length : 0);
+  function adoptGuest() {
+    if (!loggedIn()) return 0;
+    const accounts = store.get('accounts');
+    const guest = accounts.guest?.items || {};
+    const mine = space().items;
+    let n = 0;
+    for (const [id, it] of Object.entries(guest)) {
+      if (mine[id]) continue; // what the account already has wins
+      mine[id] = { ...it, ...(it.status === 'SKIP' ? {} : { dirty: true }) };
+      n += 1;
+    }
+    delete accounts.guest;
+    store.set('accounts', accounts);
+    return n;
+  }
 
   function meFor(id) {
     const t = tracking.get('items')[id];
@@ -97,6 +184,8 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
       taste: S.taste ? summarizeTaste(S.taste) : null,
       errors: S.errors,
       pending: pendingCount(),
+      guestItems: guestCount(),
+      account: who()?.label || null,
     };
   }
 
@@ -114,7 +203,7 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
       S.updatedAt = c.ts;
     }
     const u = cache.get('user');
-    if (u && u.name === userName()) useUser(u);
+    if (u && u.name === who()?.key) useUser(u);
     S.extra = cache.get('extra')?.shows || [];
   }
 
@@ -129,7 +218,7 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
       const keep = Object.entries(cache.get('seasons'))
         .filter(([k]) => k !== key)
         .sort((a, b) => b[1].ts - a[1].ts)
-        .slice(0, SEASONS_KEPT - 1);
+        .slice(0, seasonsKept - 1);
       cache.set('seasons', { ...Object.fromEntries(keep), [key]: fresh });
       return fresh;
     } catch (e) {
@@ -139,17 +228,24 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
   }
 
   async function syncUser(force, errors) {
-    const name = userName();
-    if (!name) return useUser(null);
+    const w = who();
+    if (!w) return useUser(null);
+    const name = w.key; // the cache is keyed by account, so switching accounts never shows the old list
     const u = cache.get('user');
     if (u && u.name === name && !force && now() - u.ts < USER_TTL) return useUser(u);
     try {
-      const entries = await AL.fetchUserList(name);
+      const entries = await AL.fetchUserList(w.userId ? { userId: w.userId } : { userName: w.userName }, w.userId ? getToken() : null);
       const fresh = { name, ts: now(), listMap: listMapFrom(entries), list: compactList(entries), taste: buildTaste(entries) };
+      if (who()?.key !== name) return; // you logged in or out while this was loading
       cache.set('user', fresh);
       useUser(fresh);
     } catch (e) {
-      errors.user = `Could not read the AniList list for "${name}": ${e.message}`;
+      if (w.userId && isAuthError(e)) {
+        clearToken();
+        errors.sync = LOGIN_EXPIRED;
+      } else {
+        errors.user = w.userId ? `Could not read your AniList list: ${e.message}` : `Could not read the AniList list for "${w.label}": ${e.message}. Check the username, and that the list is public.`;
+      }
       useUser(u && u.name === name ? u : null);
     }
   }
@@ -236,6 +332,7 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
     if (season && year) S.season = { season, year };
     const want = { ...S.season };
     const errors = {};
+    await ensureViewer(errors);
     const [loaded] = await Promise.all([loadSeason(want, force, errors), syncUser(force && user !== false, errors)]);
     // If you switched season while this one was loading, the newer request owns S.raw and the errors.
     const current = seasonKey(S.season) === seasonKey(want);
@@ -317,7 +414,7 @@ function createCore({ AL, settings, tracking, cache, dubMatch = () => null, getT
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, upcoming };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, upcoming, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */
