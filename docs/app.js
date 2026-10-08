@@ -1852,7 +1852,7 @@ window.__require = require;
     return `<section class="section">
         <h2>TorBox / Stremio</h2>
         <p class="note">Use TorBox through its official Stremio integration. AniTrack keeps the account and playback inside Stremio rather than handling torrent sources itself.</p>
-        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torbox">Set up TorBox in Stremio ↗</button></div><span class="hint">Install the official TorBox Stremio add-on, then use Stremio to watch content you are authorised to access.</span></div>
+        <div class="field"><label>Setup</label><div><button class="btn primary small" data-act="torbox">Set up TorBox in Stremio ↗</button></div><span class="hint">Open TorBox's current Stremio integration settings. TorBox currently has its hosted Stremio addon disabled, so this page is the correct place to check the current integration status.</span></div>
       </section>`;
   }
 
@@ -2309,7 +2309,7 @@ window.__require = require;
       return;
     }
     if (act === 'torbox') {
-      window.api.openExternal('https://stremio-addons.netlify.app/torbox');
+      window.api.openExternal('https://torbox.app/settings?section=stremio-settings');
       return;
     }
     const cardEl = btn.closest('[data-id]');
