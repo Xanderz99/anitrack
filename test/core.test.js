@@ -308,25 +308,34 @@ test('rating saves to AniList and marks your taste for relearning', async () => 
 });
 
 test('details: full synopsis, trailer, related seasons, and lookup of shows not loaded', async () => {
-  const rich = media(1, {
-    description: 'Line one.<br><br>Line <i>two</i>.',
-    trailer: { site: 'youtube', id: 'abc123XYZ' },
-    relations: { edges: [
-      { relationType: 'SEQUEL', node: { id: 2, type: 'ANIME', format: 'TV', title: { english: 'Season 2' } } },
-      { relationType: 'PREQUEL', node: { id: 3, type: 'ANIME', format: 'TV', title: { romaji: 'Zero' } } },
-      { relationType: 'ADAPTATION', node: { id: 4, type: 'MANGA', title: { romaji: 'Manga' } } },
-    ] },
-  });
-  const { core, AL } = setup({ shows: [rich] });
+  const relations = { edges: [
+    { relationType: 'SEQUEL', node: { id: 2, type: 'ANIME', format: 'TV', title: { english: 'Season 2' } } },
+    { relationType: 'PREQUEL', node: { id: 3, type: 'ANIME', format: 'TV', title: { romaji: 'Zero' } } },
+    { relationType: 'ADAPTATION', node: { id: 4, type: 'MANGA', title: { romaji: 'Manga' } } },
+  ] };
+  const { core, AL } = setup({ shows: [media(1, { description: 'Short.' })] });
+  let fetched = 0;
+  AL.fetchDetails = async (id) => (fetched++, media(id, { description: 'Line one.<br><br>Line <i>two</i>.', trailer: { site: 'youtube', id: 'abc123XYZ' }, relations }));
   await core.refresh({});
   const d = await core.details(1);
   assert.strictEqual(d.synopsis, 'Line one.\n\nLine two.');
   assert.strictEqual(d.trailer, 'https://www.youtube.com/watch?v=abc123XYZ');
   assert.deepStrictEqual(d.related.map((r) => [r.relation, r.title]), [['Prequel', 'Zero'], ['Sequel', 'Season 2']]);
+  assert.strictEqual(core.basePayload().shows[0].description, 'Short.', 'the season list is not changed by opening details');
 
-  let looked = 0;
-  AL.fetchByIds = async (ids) => (looked++, ids.map((id) => media(id)));
-  assert.strictEqual((await core.details(77)).title, 'Show 77');
+  assert.strictEqual((await core.details(77)).title, 'Show 77', 'a show that is not loaded is looked up');
   await core.details(77);
-  assert.strictEqual(looked, 1, 'a looked-up show is remembered');
+  assert.strictEqual(fetched, 2, 'each show is fetched once');
+});
+
+test('details still opens offline for a loaded show, without the extras', async () => {
+  const { core, AL } = setup();
+  AL.fetchDetails = async () => {
+    throw new Error('Could not reach AniList.');
+  };
+  await core.refresh({});
+  const d = await core.details(1);
+  assert.strictEqual(d.title, 'Show 1');
+  assert.strictEqual(d.trailer, null);
+  await assert.rejects(core.details(999), /Could not reach/, 'an unknown show cannot be shown offline');
 });

@@ -91,8 +91,7 @@ const MEDIA_FIELDS = `
       coverImage{ large extraLarge color } bannerImage studios(isMain:true){ nodes{ name } }
       startDate{ year month day } nextAiringEpisode{ episode airingAt }
       externalLinks{ site type url }
-      relations{ edges{ relationType node{ id type format title{ romaji english } } } }
-      trailer{ id site }
+      relations{ edges{ relationType node{ id type format } } }
 `;
 
 const SEASON_Q = `query($page:Int,$season:MediaSeason,$year:Int){
@@ -119,6 +118,21 @@ ${MEDIA_FIELDS}
     }
   }
 }`;
+
+// One show with the extras only its details page needs. Kept out of MEDIA_FIELDS: AniList rejects
+// requests above a complexity limit, and a 50-show season page with these nested lists can pass it.
+const DETAILS_Q = `query($id:Int){
+  Media(id:$id, type:ANIME){
+${MEDIA_FIELDS}
+    trailer{ id site }
+    relations{ edges{ relationType node{ id type format title{ romaji english } } } }
+  }
+}`;
+
+async function fetchDetails(id) {
+  const data = await gql(DETAILS_Q, { id: Number(id) });
+  return data.Media;
+}
 
 // Any anime on AniList by title, best matches first.
 async function searchAnime(q) {
@@ -200,7 +214,7 @@ async function saveEntry(token, { mediaId, progress, status, score }) {
   return data.SaveMediaListEntry;
 }
 
-module.exports = { fetchSeason, fetchByIds, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
 
   },
   taste: (module, exports, require) => {
@@ -806,14 +820,26 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   const RELATED = { PREQUEL: 'Prequel', SEQUEL: 'Sequel', PARENT: 'Main story', SIDE_STORY: 'Side story', SPIN_OFF: 'Spin-off', ALTERNATIVE: 'Alternative version' };
   const trailerUrl = (t) => (t?.site === 'youtube' && /^[\w-]{6,20}$/.test(t.id) ? `https://www.youtube.com/watch?v=${t.id}` : t?.site === 'dailymotion' && /^\w{4,20}$/.test(t.id) ? `https://www.dailymotion.com/video/${t.id}` : null);
   // Everything about one show. Looks it up on AniList when it is not loaded (an old show on your list).
+  const extras = new Map(); // id -> details-only data (trailer, related titles), fetched once
   async function details(id) {
     id = Number(id);
+    let full = extras.get(id);
+    if (!full) {
+      try {
+        full = await AL.fetchDetails(id);
+        if (full) extras.set(id, full);
+      } catch (e) {
+        if (!findRaw(id)) throw e; // nothing to show at all
+        // Offline or AniList hiccup: show the page from what is loaded, without trailer and titles.
+      }
+    }
     let raw = findRaw(id);
     if (!raw) {
-      [raw] = await AL.fetchByIds([id]);
-      if (!raw) return null;
+      if (!full) return null;
+      raw = full;
       found.set(id, raw);
     }
+    if (full) raw = { ...raw, description: full.description ?? raw.description, trailer: full.trailer, relations: full.relations || raw.relations };
     const order = Object.keys(RELATED);
     const related = (raw.relations?.edges || [])
       .filter((e) => RELATED[e.relationType] && e.node?.type === 'ANIME')

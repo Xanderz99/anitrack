@@ -20,7 +20,8 @@ const isArtwork = (url) => url.protocol === 'https:' && /(^|\.)anilist\.co$/.tes
 let trimming = null;
 function trimImages() {
   // Runs at most once at a time; cache.keys() lists entries oldest first.
-  trimming ||= caches
+  if (trimming) return;
+  trimming = caches
     .open(IMAGES)
     .then(async (c) => {
       const keys = await c.keys();
