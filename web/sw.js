@@ -5,7 +5,7 @@
 const CACHE = 'anitrack-v3';
 const IMAGES = 'anitrack-img-v3';
 const MAX_IMAGES = 600; // roughly 30 MB of posters; the oldest are dropped first
-const SHELL = ['./', 'index.html', 'app.js', 'styles.css', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
+const SHELL = ['./', 'index.html', 'boot.js', 'app.js', 'styles.css', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));

@@ -1254,13 +1254,6 @@ window.__require = require;
 })(window.__require);
 'use strict';
 (() => {
-  const showBootError = (message) => {
-    try {
-      document.body.innerHTML = '<main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#0b0b0e;color:#fff;font:16px system-ui,sans-serif"><section style="max-width:560px"><h1 style="margin:0 0 12px">AniTrack could not start</h1><p style="margin:0 0 16px;opacity:.8">The app hit an error while loading. Please reload once. If it keeps happening, the error below identifies the broken part.</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:#17171c;padding:14px;border-radius:10px">' + String(message || 'Unknown error').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre></section></main>';
-    } catch {}
-  };
-  window.addEventListener('error', (e) => showBootError(e.error?.stack || e.message || 'JavaScript error'), true);
-  window.addEventListener('unhandledrejection', (e) => showBootError(e.reason?.stack || e.reason?.message || String(e.reason || 'Unhandled promise rejection')), true);
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // UI preferences. Keys share the anitrack: prefix so "Remove all AniTrack data" clears them too;
@@ -1334,34 +1327,6 @@ window.__require = require;
   const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   const monthFmt = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
   const saveFilters = () => store.set('filters', { cr: S.filters.cr, dub: S.filters.dub, hideSeq: S.filters.hideSeq });
-  function addonList() {
-    const value = store.get('stremioAddons', []);
-    return Array.isArray(value) ? value : [];
-  }
-  function saveAddonList(list) {
-    store.set('stremioAddons', list.slice(0, 30));
-  }
-  async function readAddonManifest(value) {
-    let url = String(value || '').trim();
-    if (!url) throw new Error('Enter a manifest URL.');
-    if (!/^https?:\/\//i.test(url)) throw new Error('Manifest URL must start with http:// or https://.');
-    if (!/\/manifest\.json$/i.test(url)) url = url.replace(/\/+$/, '') + '/manifest.json';
-    const response = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    if (!response.ok) throw new Error('Could not load the manifest (HTTP ' + response.status + ').');
-    const manifest = await response.json();
-    if (!manifest.id || !manifest.name || !manifest.version) throw new Error('That does not look like a valid Stremio manifest.');
-    return { id: String(manifest.id), name: String(manifest.name), version: String(manifest.version), description: String(manifest.description || ''), url: url, behaviorHints: manifest.behaviorHints || {} };
-  }
-  function stremioInstallUrl(url) {
-    const u = new URL(url);
-    u.pathname = u.pathname.replace(/\/manifest\.json$/i, '') + '/manifest.json';
-    return 'stremio://' + u.host + u.pathname + u.search;
-  }
-  function addonsSection() {
-    const addons = addonList();
-    const rows = addons.map((a) => '<div class="field"><label>' + esc(a.name) + '</label><div><button class="btn small primary" data-act="installAddon" data-addon-id="' + esc(a.id) + '">Install in Stremio ↗</button> <button class="btn small danger" data-act="removeAddon" data-addon-id="' + esc(a.id) + '">Remove</button></div><span class="hint">' + esc(a.description || a.url) + '</span></div>').join('');
-    return '<section class="section"><h2>Stremio Addons</h2><p class="note">Save addon manifests on this device and open them in Stremio. AniTrack does not scrape torrent sources or proxy addon traffic.</p>' + (rows || '<p class="note">No addons saved yet.</p>') + '<form data-form="stremioAddon" class="field"><label for="stremioAddonUrl">Manifest URL</label><div><input id="stremioAddonUrl" name="url" type="url" placeholder="https://example.com/manifest.json" autocomplete="off"><button class="btn small primary">Add addon</button></div></form></section>';
-  }
   // For url('…') inside a style attribute: percent-encode anything that could end the value early.
   const cssUrl = (u) => esc(String(u || '').replace(/["'()\\\s]/g, encodeURIComponent));
 
@@ -1922,7 +1887,6 @@ window.__require = require;
       </section>
       <section class="section"><h2>Season</h2><div class="season"><button class="btn small" data-season="-1" aria-label="Previous season">‹</button><b>${esc(`${d.season.season[0]}${d.season.season.slice(1).toLowerCase()} ${d.season.year}`)}</b><button class="btn small" data-season="1" aria-label="Next season">›</button></div>
         <p class="note">${d.updatedAt ? `Updated ${esc(timeFmt.format(new Date(d.updatedAt)))}` : ''} <button class="btn small" data-refresh>Refresh now</button></p></section>
-      ${addonsSection()}
       ${deviceSection()}`;
     }
     return `
@@ -2340,20 +2304,6 @@ window.__require = require;
       adoptGuest();
       return;
     }
-    if (act === 'installAddon' || act === 'removeAddon') {
-      const addon = addonList().find((item) => item.id === btn.dataset.addonId);
-      if (!addon) return;
-      if (act === 'removeAddon') {
-        saveAddonList(addonList().filter((item) => item.id !== addon.id));
-        toast('Addon removed');
-        render();
-        return;
-      }
-      const u = new URL(addon.url);
-      u.pathname = u.pathname.replace(/\/manifest\.json$/i, '') + '/manifest.json';
-      window.api.openExternal('stremio://' + u.host + u.pathname + u.search);
-      return;
-    }
     if (act === 'resetDevice') {
       if (!window.confirm('Remove all AniTrack data from this device? You will be logged out. Your AniList account is not affected.')) return;
       await window.api.resetDevice();
@@ -2424,20 +2374,6 @@ window.__require = require;
   });
 
   document.addEventListener('submit', async (e) => {
-    const form = e.target.closest('[data-form="stremioAddon"]');
-    if (form) {
-      e.preventDefault();
-      try {
-        const addon = await readAddonManifest(form.elements.url.value);
-        saveAddonList([addon, ...addonList().filter((item) => item.id !== addon.id)]);
-        form.elements.url.value = '';
-        toast('Added ' + addon.name);
-        render();
-      } catch (err) {
-        toast(err.message || String(err));
-      }
-      return;
-    }
     const form = e.target.closest('[data-form="welcomeName"]');
     if (!form) return;
     e.preventDefault();
@@ -2525,6 +2461,7 @@ window.__require = require;
   }, 60000);
 
   render();
+  window.__anitrackBooted = true; // tells boot.js the app started; from here the app reports its own errors
   window.api.init().then((d) => {
     S.data = d;
     render();

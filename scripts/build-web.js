@@ -21,6 +21,7 @@ function build() {
   js += `if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});\n`;
   files['app.js'] = js;
   files['styles.css'] = read('renderer/styles.css') + read('web/mobile.css');
+  files['boot.js'] = read('renderer/boot.js');
   for (const f of ['index.html', 'manifest.webmanifest', 'sw.js']) files[f] = fs.readFileSync(path.join(root, 'web', f));
   for (const f of fs.readdirSync(path.join(root, 'web', 'icons'))) files[`icons/${f}`] = fs.readFileSync(path.join(root, 'web', 'icons', f));
   files['.nojekyll'] = '';
