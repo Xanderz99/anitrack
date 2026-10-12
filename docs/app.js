@@ -1481,31 +1481,16 @@ window.__require = require;
       .filter((s) => s.me.status === 'WATCHING' && aired(s) != null && aired(s) > s.me.progress)
       .sort((a, b) => (b.resume && !b.resume.done ? 1 : 0) - (a.resume && !a.resume.done ? 1 : 0));
     const foryou = listFor('foryou');
-    const hero = upNext[0] || foryou[0] || shows.find((s) => s.onCR);
+    // The banner is a slideshow of everything in Up Next (or, with nothing to catch up on, your top picks).
+    const slides = upNext.length ? upNext.slice(0, 8) : foryou.length ? foryou.slice(0, 5) : shows.filter((s) => s.onCR).slice(0, 1);
     let html = '';
-    if (hero) {
-      const up = hero === upNext[0];
-      const resuming = hero.resume && !hero.resume.done && hero.resume.time > 30;
-      const waiting = up ? aired(hero) - hero.me.progress : 0;
-      const kind = up ? (resuming ? 'Continue Watching' : 'Up Next') : 'Featured for you';
-      const bits = [hero.genres.slice(0, 3).join(' · '), hero.episodes ? `${hero.episodes} episodes` : '', hero.dub === 'announced' ? 'English dub' : ''].filter(Boolean);
-      const blurb = up ? (waiting > 1 ? `${waiting} episodes ready to watch.` : 'The next episode is ready.') : hero.why && hero.why.length ? `Because you like ${hero.why.join(', ')}.` : '';
-      const play = up && !resuming ? `Episode ${hero.me.progress + 1}` : watchLabel(hero);
-      const pct = up && hero.episodes ? Math.min(100, Math.round((hero.me.progress / hero.episodes) * 100)) : 0;
-      const prog = up ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${hero.me.progress}${hero.episodes ? ` of ${hero.episodes}` : ''} watched</span></div>` : '';
-      const second = up
-        ? `<button class="btn big icon" data-act="inc" aria-label="Mark episode ${hero.me.progress + 1} watched" title="Mark episode ${hero.me.progress + 1} watched">${ICON.check}</button>`
-        : hero.me.status
-          ? ''
-          : `<button class="btn big icon" data-act="plan" aria-label="Plan to watch" title="Plan to watch">${ICON.plus}</button>`;
-      const info = `<button class="btn big icon" data-act="details" aria-label="Details" title="Details">${ICON.info}</button>`;
-      const art = hero.coverXL || hero.cover;
-      html += `<section class="hero ${hero.banner ? 'has-banner' : ''}" data-id="${hero.id}" style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
-        <div class="hero-bg" style="background-image:url('${cssUrl(hero.banner || art)}')"></div>
-        ${art ? `<img class="hero-art" src="${esc(art)}" alt="" fetchpriority="high" decoding="async">` : ''}
-        <div class="hero-in"><div class="eyebrow">${kind}${hero.match != null && !up ? ` · ${hero.match}% match` : ''}</div>
-          <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div>${prog}<div class="hero-d">${esc(blurb)}</div>
-          <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(play)}</button>${second}${info}</div></div></section>`;
+    if (slides.length) {
+      const body = slides.map((hero, i) => heroSlide(hero, upNext.includes(hero), i, slides.length)).join('');
+      html += slides.length > 1
+        ? `<div class="hero-car" role="region" aria-roledescription="carousel" aria-label="${upNext.length ? 'Up Next' : 'Featured'}">
+            <div class="hero-track">${body}</div>
+            <div class="hero-dots">${slides.map((x, i) => `<button class="dot" data-hero-dot="${i}" aria-label="Show ${i + 1}: ${esc(x.title)}"></button>`).join('')}</div></div>`
+        : body;
     }
     const wk = Date.now() / 1000 + 7 * 86400;
     const airing = shows.filter((s) => s.next && s.next.airingAt < wk && ['WATCHING', 'PLANNING'].includes(s.me.status)).sort((a, b) => a.next.airingAt - b.next.airingAt);
@@ -1519,6 +1504,74 @@ window.__require = require;
     html += shelf('Plan to Watch', planning, (s) => (s.next ? `Ep ${s.next.episode} · ${relSpan(s.next.airingAt)}` : esc(s.genres.slice(0, 2).join(', '))));
     return html || '<div class="empty">Nothing to show yet. Log in with AniList in Settings, or pick shows to track from This Season.</div>';
   }
+  function heroSlide(hero, up, i, n) {
+    const resuming = hero.resume && !hero.resume.done && hero.resume.time > 30;
+    const waiting = up ? aired(hero) - hero.me.progress : 0;
+    const kind = up ? (resuming ? 'Continue Watching' : 'Up Next') : 'Featured for you';
+    const bits = [hero.genres.slice(0, 3).join(' · '), hero.episodes ? `${hero.episodes} episodes` : '', hero.dub === 'announced' ? 'English dub' : ''].filter(Boolean);
+    const blurb = up ? (waiting > 1 ? `${waiting} episodes ready to watch.` : 'The next episode is ready.') : hero.why && hero.why.length ? `Because you like ${hero.why.join(', ')}.` : '';
+    const play = up && !resuming ? `Episode ${hero.me.progress + 1}` : watchLabel(hero);
+    const pct = up && hero.episodes ? Math.min(100, Math.round((hero.me.progress / hero.episodes) * 100)) : 0;
+    const prog = up ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${hero.me.progress}${hero.episodes ? ` of ${hero.episodes}` : ''} watched</span></div>` : '';
+    const second = up
+      ? `<button class="btn big icon" data-act="inc" aria-label="Mark episode ${hero.me.progress + 1} watched" title="Mark episode ${hero.me.progress + 1} watched">${ICON.check}</button>`
+      : hero.me.status
+        ? ''
+        : `<button class="btn big icon" data-act="plan" aria-label="Plan to watch" title="Plan to watch">${ICON.plus}</button>`;
+    const info = `<button class="btn big icon" data-act="details" aria-label="Details" title="Details">${ICON.info}</button>`;
+    const art = hero.coverXL || hero.cover;
+    // The first slides load straight away; later ones as the slideshow approaches them.
+    const load = i === 0 ? 'fetchpriority="high"' : i < 3 ? 'loading="eager"' : 'loading="lazy"';
+    return `<section class="hero ${hero.banner ? 'has-banner' : ''}" data-id="${hero.id}" ${n > 1 ? `aria-roledescription="slide" aria-label="${i + 1} of ${n}"` : ''} style="${hero.color ? `--tint:${esc(hero.color)}` : ''}">
+        <div class="hero-bg" style="background-image:url('${cssUrl(hero.banner || art)}')"></div>
+        ${art ? `<img class="hero-art" src="${esc(art)}" alt="" ${load} decoding="async">` : ''}
+        <div class="hero-in"><div class="eyebrow">${kind}${n > 1 ? ` · ${i + 1} of ${n}` : ''}${hero.match != null && !up ? ` · ${hero.match}% match` : ''}</div>
+          <h1 class="hero-t">${esc(hero.title)}</h1><div class="hero-m">${esc(bits.join('  ·  '))}</div>${prog}<div class="hero-d">${esc(blurb)}</div>
+          <div class="hero-a"><button class="btn primary big" data-act="watch">▶ ${esc(play)}</button>${second}${info}</div></div></section>`;
+  }
+
+  /* ---------- Home banner slideshow ---------- */
+  // Moves to the next show every few seconds. Swiping or tapping a dot takes over (and pauses it a
+  // while); it also waits while a sheet is open, the app is in the background, or Reduce Motion is on.
+  const SLIDE_MS = 6000;
+  const slideTrack = () => $('#content .hero-track');
+  const slideWidth = (t) => t.clientWidth || 1;
+  function goSlide(i, smooth = true) {
+    const t = slideTrack();
+    if (!t) return;
+    const n = t.children.length;
+    S.heroIndex = ((i % n) + n) % n;
+    t.scrollTo({ left: S.heroIndex * slideWidth(t), behavior: smooth ? 'smooth' : 'auto' });
+    markDots();
+  }
+  function markDots() {
+    document.querySelectorAll('#content .hero-dots .dot').forEach((d, i) => d.classList.toggle('on', i === S.heroIndex));
+  }
+  // After each redraw: same slide as before, and listen for swipes.
+  function setupSlides() {
+    const t = slideTrack();
+    if (!t) return;
+    S.heroIndex = Math.min(S.heroIndex || 0, t.children.length - 1);
+    t.scrollLeft = S.heroIndex * slideWidth(t);
+    markDots();
+    let settle;
+    t.addEventListener('scroll', () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        S.heroIndex = Math.round(t.scrollLeft / slideWidth(t));
+        markDots();
+      }, 80);
+    }, { passive: true });
+    const hold = () => (S.heroHoldUntil = Date.now() + 12000);
+    for (const ev of ['pointerdown', 'touchstart', 'wheel']) t.addEventListener(ev, hold, { passive: true });
+  }
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  setInterval(() => {
+    if (S.view !== 'home' || S.player || S.detail || document.hidden || reduceMotion?.matches) return;
+    if (document.querySelector('.sheet-back') || Date.now() < (S.heroHoldUntil || 0)) return;
+    if (slideTrack()) goSlide((S.heroIndex || 0) + 1);
+  }, SLIDE_MS);
+
   function tonightPicks() {
     const shows = S.data.shows;
     const budget = S.tmins <= 30 ? 1 : S.tmins <= 60 ? 2 : 4;
@@ -1814,6 +1867,7 @@ window.__require = require;
       const sl = [...el.querySelectorAll('.shelf-row')].map((r) => r.scrollLeft);
       el.innerHTML = errors() + homeHtml();
       el.querySelectorAll('.shelf-row').forEach((r, i) => (r.scrollLeft = sl[i] || 0));
+      setupSlides();
       el.scrollTop = top;
       return;
     }
@@ -2308,6 +2362,12 @@ window.__require = require;
     if (nav) {
       if (S.player) await window.api.closePlayer();
       go(nav.dataset.nav);
+      return;
+    }
+    const dot = e.target.closest('[data-hero-dot]');
+    if (dot) {
+      S.heroHoldUntil = Date.now() + 12000;
+      goSlide(Number(dot.dataset.heroDot));
       return;
     }
     const tm = e.target.closest('[data-tmins]');

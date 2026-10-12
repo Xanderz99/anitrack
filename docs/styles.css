@@ -299,6 +299,15 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 
 .offline { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: var(--chip); color: var(--muted); font-size: 14px; }
 
+/* ===== Home banner slideshow ===== */
+.hero-car { position: relative; margin: 4px 0 28px; }
+.hero-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; border-radius: 24px; }
+.hero-track::-webkit-scrollbar { display: none; }
+.hero-track > .hero { flex: 0 0 100%; margin: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.hero-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+.dot { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 99px; background: rgba(255, 255, 255, 0.3); cursor: pointer; transition: width 0.25s, background 0.25s; }
+.dot.on { width: 20px; background: #fff; }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
@@ -344,6 +353,10 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adj
   [data-view=home] .bar h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   [data-view=home] .gear { background: rgba(0, 0, 0, 0.35) !important; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; }
 
+  .hero-car { margin: 0 -16px 22px; }
+  .hero-track { border-radius: 0; }
+  .hero-track > .hero { margin: 0; }
+  .hero-dots { margin-top: 12px; }
   .hero { display: block; margin: 0 -16px 26px; min-height: 0; border-radius: 0; background: var(--bg); overflow: hidden; }
   .hero::after { display: none; }
   .hero-bg { display: none; }
