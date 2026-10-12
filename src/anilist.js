@@ -129,6 +129,23 @@ async function fetchSeason(season, year) {
   return all;
 }
 
+// Just what changes during a season (episode count, airing status, next episode), for quick refreshes
+// between full season loads. A few bytes per show instead of the full media fields.
+const AIRING_Q = `query($ids:[Int]){
+  Page(perPage:50){
+    media(id_in:$ids, type:ANIME){ id status episodes nextAiringEpisode{ episode airingAt } }
+  }
+}`;
+
+async function fetchAiring(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const data = await gql(AIRING_Q, { ids: ids.slice(i, i + 50) });
+    out.push(...data.Page.media);
+  }
+  return out;
+}
+
 // Shows from other seasons (for example something you are still watching from last season).
 async function fetchByIds(ids) {
   const out = [];
@@ -200,4 +217,4 @@ async function deleteEntry(token, entryId) {
   return !!data.DeleteMediaListEntry?.deleted;
 }
 
-module.exports = { deleteEntry, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { deleteEntry, fetchAiring, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };

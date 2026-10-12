@@ -402,7 +402,7 @@ function checkAirings() {
     for (const [k, t] of Object.entries(notified)) if (now - t > 30 * 86400e3) delete notified[k];
     tracking.set('notified', notified);
   }
-  if (needRefresh) refresh({ force: true, user: false }).then((p) => send('data', p)).catch(() => {});
+  if (needRefresh) refresh({ airing: true, user: false }).then((p) => send('data', p)).catch(() => {}); // just the airing times
 }
 
 /* ---------- IPC ---------- */

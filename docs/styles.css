@@ -297,6 +297,8 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .ptr.ready { color: var(--fg); }
 @media (min-width: 761px) { .ptr { display: none; } }
 
+.offline { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: var(--chip); color: var(--muted); font-size: 14px; }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }

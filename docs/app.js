@@ -150,6 +150,23 @@ async function fetchSeason(season, year) {
   return all;
 }
 
+// Just what changes during a season (episode count, airing status, next episode), for quick refreshes
+// between full season loads. A few bytes per show instead of the full media fields.
+const AIRING_Q = `query($ids:[Int]){
+  Page(perPage:50){
+    media(id_in:$ids, type:ANIME){ id status episodes nextAiringEpisode{ episode airingAt } }
+  }
+}`;
+
+async function fetchAiring(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const data = await gql(AIRING_Q, { ids: ids.slice(i, i + 50) });
+    out.push(...data.Page.media);
+  }
+  return out;
+}
+
 // Shows from other seasons (for example something you are still watching from last season).
 async function fetchByIds(ids) {
   const out = [];
@@ -221,7 +238,7 @@ async function deleteEntry(token, entryId) {
   return !!data.DeleteMediaListEntry?.deleted;
 }
 
-module.exports = { deleteEntry, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
+module.exports = { deleteEntry, fetchAiring, fetchSeason, fetchByIds, fetchDetails, searchAnime, fetchUserList, fetchViewer, saveEntry, gql, config };
 
   },
   taste: (module, exports, require) => {
@@ -403,7 +420,8 @@ const { buildTaste, scoreShow, summarizeTaste, listMapFrom, seasonFor } = requir
 const L2ME = { CURRENT: 'WATCHING', REPEATING: 'WATCHING', PLANNING: 'PLANNING', COMPLETED: 'COMPLETED', PAUSED: 'PAUSED', DROPPED: 'DROPPED' };
 const ME2L = { WATCHING: 'CURRENT', PLANNING: 'PLANNING', COMPLETED: 'COMPLETED', PAUSED: 'PAUSED', DROPPED: 'DROPPED' }; // SKIP stays local
 
-const SEASON_TTL = 30 * 60e3;
+const SEASON_TTL = 30 * 60e3; // older than this: refresh airing times (light)
+const SEASON_FULL_TTL = 12 * 3600e3; // older than this: reload the whole season (titles, art, links…)
 const EXTRA_TTL = 30 * 60e3;
 const USER_TTL = 6 * 3600e3;
 const SEASONS_KEPT = 4; // cached seasons; older ones are fetched again if you browse back to them
@@ -610,10 +628,26 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     S.extra = cache.get('extra')?.shows || [];
   }
 
-  async function loadSeason(want, force, errors) {
+  // Keeps the season's shows current. Between full loads only airing data changes, so most refreshes
+  // ask AniList for just that and merge it in. `airing` forces that light refresh (an episode just aired).
+  async function loadSeason(want, force, errors, airing) {
     const key = seasonKey(want);
     const c = cache.get('seasons')[key];
-    if (c && !force && now() - c.ts < SEASON_TTL) return c;
+    if (c && !force && !airing && now() - c.ts < SEASON_TTL) return c;
+    if (c && !force && now() - (c.fullTs || c.ts) < SEASON_FULL_TTL) {
+      try {
+        const latest = new Map((await AL.fetchAiring(c.shows.map((s) => s.id))).map((m) => [m.id, m]));
+        const shows = c.shows.map((s) => {
+          const m = latest.get(s.id);
+          return m ? { ...s, status: m.status, episodes: m.episodes ?? s.episodes, nextAiringEpisode: m.nextAiringEpisode } : s;
+        });
+        const lighter = { ts: now(), fullTs: c.fullTs || c.ts, shows };
+        cache.set('seasons', { ...cache.get('seasons'), [key]: lighter });
+        return lighter;
+      } catch {
+        /* fall back to a full load below */
+      }
+    }
     try {
       const shows = await AL.fetchSeason(want.season, want.year);
       const fresh = { ts: now(), shows };
@@ -731,12 +765,12 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     }
   }
 
-  async function refresh({ season, year, force, user } = {}) {
+  async function refresh({ season, year, force, user, airing } = {}) {
     if (season && year) S.season = { season, year };
     const want = { ...S.season };
     const errors = {};
     await ensureViewer(errors);
-    const [loaded] = await Promise.all([loadSeason(want, force, errors), syncUser(force && user !== false, errors)]);
+    const [loaded] = await Promise.all([loadSeason(want, force, errors, airing), syncUser(force && user !== false, errors)]);
     // If you switched season while this one was loading, the newer request owns S.raw and the errors.
     const current = seasonKey(S.season) === seasonKey(want);
     if (current) {
@@ -1070,6 +1104,7 @@ window.__require = require;
       auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId && onOfficialSite() },
       firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
       drm: false,
+      offline: navigator.onLine === false,
     };
   }
 
@@ -1168,6 +1203,12 @@ window.__require = require;
         // Coming back to the app after a while: refresh quietly.
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'visible' && Date.now() - core.S.updatedAt > 15 * 60e3) refresh({}).then((p) => emit('data', p)).catch(() => {});
+        });
+        // Signal lost: say so (instead of AniList errors). Back online: catch up straight away.
+        window.addEventListener('offline', () => emit('data', payload()));
+        window.addEventListener('online', () => {
+          emit('data', payload());
+          refresh({}).then((p) => emit('data', p)).catch(() => {});
         });
         // Another tab changed something: pick it up instead of overwriting it on the next save.
         window.addEventListener('storage', (e) => {
@@ -1702,7 +1743,10 @@ window.__require = require;
   }
 
   function errors() {
-    const e = S.data.errors || {};
+    const d = S.data;
+    // Offline, every AniList error just means "no signal": one calm line instead of a red list.
+    if (d.offline) return `<p class="offline">You're offline. ${d.updatedAt ? `Showing what was saved at ${esc(timeFmt.format(new Date(d.updatedAt)))}.` : 'Showing what was saved.'}${d.auth.loggedIn ? " Changes are kept and sent to AniList when you're back online." : ''}</p>`;
+    const e = d.errors || {};
     return Object.values(e)
       .map((m) => `<p class="err">${esc(m)}</p>`)
       .join('');

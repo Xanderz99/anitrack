@@ -413,7 +413,10 @@
   }
 
   function errors() {
-    const e = S.data.errors || {};
+    const d = S.data;
+    // Offline, every AniList error just means "no signal": one calm line instead of a red list.
+    if (d.offline) return `<p class="offline">You're offline. ${d.updatedAt ? `Showing what was saved at ${esc(timeFmt.format(new Date(d.updatedAt)))}.` : 'Showing what was saved.'}${d.auth.loggedIn ? " Changes are kept and sent to AniList when you're back online." : ''}</p>`;
+    const e = d.errors || {};
     return Object.values(e)
       .map((m) => `<p class="err">${esc(m)}</p>`)
       .join('');

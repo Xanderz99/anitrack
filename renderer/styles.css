@@ -296,3 +296,5 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
   display: grid; place-items: center; background: var(--panel); color: var(--muted); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); pointer-events: none; transition: transform 0.2s, color 0.2s; }
 .ptr.ready { color: var(--fg); }
 @media (min-width: 761px) { .ptr { display: none; } }
+
+.offline { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: var(--chip); color: var(--muted); font-size: 14px; }

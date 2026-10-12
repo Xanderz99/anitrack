@@ -86,6 +86,7 @@
       auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId && onOfficialSite() },
       firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
       drm: false,
+      offline: navigator.onLine === false,
     };
   }
 
@@ -184,6 +185,12 @@
         // Coming back to the app after a while: refresh quietly.
         document.addEventListener('visibilitychange', () => {
           if (document.visibilityState === 'visible' && Date.now() - core.S.updatedAt > 15 * 60e3) refresh({}).then((p) => emit('data', p)).catch(() => {});
+        });
+        // Signal lost: say so (instead of AniList errors). Back online: catch up straight away.
+        window.addEventListener('offline', () => emit('data', payload()));
+        window.addEventListener('online', () => {
+          emit('data', payload());
+          refresh({}).then((p) => emit('data', p)).catch(() => {});
         });
         // Another tab changed something: pick it up instead of overwriting it on the next save.
         window.addEventListener('storage', (e) => {

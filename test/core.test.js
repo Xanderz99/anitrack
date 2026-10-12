@@ -364,3 +364,52 @@ test('a show just added can be removed again (entry id comes back from saving)',
   assert.deepStrictEqual(deleted, [777]);
   assert.strictEqual(core.meFor(2).status, null);
 });
+
+test('between full loads only airing times are fetched, and merged into the cached season', async () => {
+  let t = 1_000_000_000_000;
+  const { core, AL, cache } = setup({ shows: [media(1, { nextAiringEpisode: { episode: 3, airingAt: 100 } }), media(2)], now: () => t });
+  let full = 0;
+  let light = 0;
+  const fetchSeason = AL.fetchSeason;
+  AL.fetchSeason = async (...a) => (full++, fetchSeason(...a));
+  AL.fetchAiring = async (ids) => (light++, ids.map((id) => ({ id, status: 'RELEASING', episodes: 12, nextAiringEpisode: id === 1 ? { episode: 4, airingAt: 200 } : null })));
+  await core.refresh({});
+  assert.deepStrictEqual([full, light], [1, 0], 'first load is full');
+
+  t += 10 * 60e3;
+  await core.refresh({});
+  assert.deepStrictEqual([full, light], [1, 0], 'fresh: nothing fetched');
+
+  t += 40 * 60e3;
+  await core.refresh({});
+  assert.deepStrictEqual([full, light], [1, 1], 'stale: airing times only');
+  assert.deepStrictEqual(core.S.raw.find((r) => r.id === 1).nextAiringEpisode, { episode: 4, airingAt: 200 });
+  assert.strictEqual(core.S.raw.find((r) => r.id === 1).title.english, 'Show 1', 'the rest of the show is kept');
+  assert.strictEqual(Object.values(cache.get('seasons'))[0].fullTs, 1_000_000_000_000, 'remembers when the last full load was');
+
+  await core.refresh({ airing: true });
+  assert.deepStrictEqual([full, light], [1, 2], 'an episode airing asks for airing times even when fresh');
+
+  await core.refresh({ force: true });
+  assert.deepStrictEqual([full, light], [2, 2], 'pull to refresh / Refresh now reloads everything');
+
+  t += 13 * 3600e3;
+  await core.refresh({});
+  assert.deepStrictEqual([full, light], [3, 2], 'after 12 hours the whole season reloads');
+});
+
+test('if the quick airing refresh fails, a full load is tried instead', async () => {
+  let t = 1_000_000_000_000;
+  const { core, AL } = setup({ now: () => t });
+  await core.refresh({});
+  AL.fetchAiring = async () => {
+    throw new Error('hiccup');
+  };
+  let full = 0;
+  const fetchSeason = AL.fetchSeason;
+  AL.fetchSeason = async (...a) => (full++, fetchSeason(...a));
+  t += 40 * 60e3;
+  await core.refresh({});
+  assert.strictEqual(full, 1);
+  assert.strictEqual(core.S.errors.season, undefined);
+});
