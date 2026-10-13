@@ -308,6 +308,13 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .dot { width: 7px; height: 7px; padding: 0; border: 0; border-radius: 99px; background: rgba(255, 255, 255, 0.3); cursor: pointer; transition: width 0.25s, background 0.25s; }
 .dot.on { width: 20px; background: #fff; }
 
+/* ===== My List stats ===== */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; max-width: 640px; margin: 0 0 18px; }
+.stat { background: var(--panel); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.stat b { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+@media (max-width: 760px) { .stats { gap: 8px; } .stat { padding: 10px; } .stat b { font-size: 18px; } }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }

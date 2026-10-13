@@ -1391,7 +1391,7 @@ window.__require = require;
     seed: Math.floor(Math.random() * 1e6),
     undo: null,
     data: null,
-    filters: Object.assign({ cr: true, dub: false, hideSeq: true }, store.get('filters', {}), { genre: '', q: '' }), // genre and search reset each launch
+    filters: Object.assign({ cr: true, dub: false, hideSeq: true, mine: false }, store.get('filters', {}), { genre: '', q: '' }), // genre and search reset each launch
     shownSyncHint: false,
     player: null,
     listTab: store.get('listTab', 'WATCHING'),
@@ -1402,7 +1402,14 @@ window.__require = require;
   const timeFmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
   const dateFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   const monthFmt = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
-  const saveFilters = () => store.set('filters', { cr: S.filters.cr, dub: S.filters.dub, hideSeq: S.filters.hideSeq });
+  const saveFilters = () => store.set('filters', { cr: S.filters.cr, dub: S.filters.dub, hideSeq: S.filters.hideSeq, mine: S.filters.mine });
+  // "Today" / "Tomorrow" read faster than a date for the next two days.
+  const dayLabel = (ts) => {
+    const d = new Date(ts * 1000);
+    const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diff = Math.round((day(d) - day(new Date())) / 86400e3);
+    return diff === 0 ? 'Today' : diff === 1 ? 'Tomorrow' : dayFmt.format(d);
+  };
   // For url('…') inside a style attribute: percent-encode anything that could end the value early.
   const cssUrl = (u) => esc(String(u || '').replace(/["'()\\\s]/g, encodeURIComponent));
 
@@ -1618,7 +1625,11 @@ window.__require = require;
           return (a.next ? a.next.airingAt : Infinity) - (b.next ? b.next.airingAt : Infinity);
         });
     }
-    if (view === 'airing') return shows.filter((s) => s.next && passes(s)).sort((a, b) => a.next.airingAt - b.next.airingAt);
+    if (view === 'airing') {
+      // "My shows": what you are watching or planning, wherever it streams.
+      const mine = (s) => ['WATCHING', 'PLANNING'].includes(s.me.status) && passes(s, { skipToggles: true });
+      return shows.filter((s) => s.next && (S.filters.mine ? mine(s) : passes(s))).sort((a, b) => a.next.airingAt - b.next.airingAt);
+    }
     return [];
   }
 
@@ -1666,7 +1677,8 @@ window.__require = require;
     const pill = (key, label) => `<button class="pill ${f[key] ? 'on' : ''}" data-filter="${key}" aria-pressed="${!!f[key]}">${label}</button>`;
     let html = `<h1>${v.label}</h1>`;
     let ctl = ''; // filters, sorting and tabs: one row that swipes sideways on a phone
-    if (['foryou', 'season', 'airing'].includes(S.view)) ctl += pill('cr', 'Crunchyroll') + pill('dub', 'English dub');
+    if (S.view === 'airing') ctl += pill('mine', 'My shows');
+    if (['foryou', 'season', 'airing'].includes(S.view) && !(S.view === 'airing' && f.mine)) ctl += pill('cr', 'Crunchyroll') + pill('dub', 'English dub');
     if (S.view === 'foryou') ctl += pill('hideSeq', 'Hide unseen sequels');
     if (['foryou', 'season', 'airing'].includes(S.view) && S.data) ctl += genreSelect();
     if (S.view === 'season') ctl += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
@@ -1712,7 +1724,7 @@ window.__require = require;
     if (s.next) {
       const d = new Date(s.next.airingAt * 1000);
       const live = s.next.airingAt * 1000 <= Date.now();
-      return `<div class="next ${live ? 'live' : ''}">Ep ${s.next.episode} · ${dayFmt.format(d)}, ${timeFmt.format(d)} · ${relSpan(s.next.airingAt)}</div>`;
+      return `<div class="next ${live ? 'live' : ''}">Ep ${s.next.episode} · ${dayLabel(s.next.airingAt)}, ${timeFmt.format(d)} · ${relSpan(s.next.airingAt)}</div>`;
     }
     if (s.start && s.start.year && s.airStatus === 'NOT_YET_RELEASED') {
       const { year, month, day } = s.start;
@@ -1830,7 +1842,12 @@ window.__require = require;
       .filter((e) => listStatus(e) === S.listTab && (!q || `${e.title} ${e.romaji}`.toLowerCase().includes(q)))
       .sort((a, b) => (S.listTab === 'COMPLETED' ? (b.score || 0) - (a.score || 0) : 0) || a.title.localeCompare(b.title));
     const done = d.list.filter((e) => listStatus(e) === 'COMPLETED').length;
-    const head = `<p class="note"><b>${esc(d.account)}</b> on AniList · ${d.list.length} anime, ${done} completed. ${d.auth.loggedIn ? 'Changes here are saved to your AniList.' : 'Log in to save changes to AniList.'}</p>`;
+    const eps = d.list.reduce((n, e) => n + (e.me.progress || 0), 0);
+    const scored = d.list.filter((e) => e.score > 0);
+    const mean = scored.length ? scored.reduce((n, e) => n + e.score, 0) / scored.length : 0;
+    const stat = (value, label) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
+    const stats = `<div class="stats">${stat(eps.toLocaleString(), 'episodes')}${stat(`~${Math.round((eps * 24) / 60).toLocaleString()}`, 'hours')}${stat(done, 'completed')}${stat(mean ? mean.toFixed(1) : '–', 'avg score')}</div>`;
+    const head = `<p class="note"><b>${esc(d.account)}</b> on AniList · ${d.list.length} anime. ${d.auth.loggedIn ? 'Changes here are saved to your AniList.' : 'Log in to save changes to AniList.'}</p>${stats}`;
     return head + (items.length ? `<div class="rows">${items.map(listRow).join('')}</div>` : '<div class="empty">Nothing here.</div>');
   }
 
@@ -1892,7 +1909,7 @@ window.__require = require;
       let day = '';
       let open = false;
       for (const s of list) {
-        const d = dayFmt.format(new Date(s.next.airingAt * 1000));
+        const d = dayLabel(s.next.airingAt);
         if (d !== day) {
           if (open) html += '</div>';
           day = d;
@@ -2240,6 +2257,28 @@ window.__require = require;
         <div class="sheet-foot">${d.siteUrl ? `<button class="link" data-act="ext" data-url="${esc(d.siteUrl)}">Open on AniList ↗</button>` : '<span></span>'}<button class="link" data-sheet-close>Close</button></div>
       </div>`;
     sheet.scrollTop = top;
+  }
+
+  // iPhone: no push notifications without a server, so while the app is open it says when an episode
+  // of a show you watch or plan has just aired (once per episode), and fetches the new airing times.
+  function announceAired() {
+    if (!S.data) return;
+    const nowS = Date.now() / 1000;
+    const seen = store.get('aired', {});
+    const fresh = S.data.shows.filter((s) => s.next && s.next.airingAt <= nowS && nowS - s.next.airingAt < 6 * 3600 && ['WATCHING', 'PLANNING'].includes(s.me.status) && !seen[`${s.id}:${s.next.episode}`]);
+    if (!fresh.length) return;
+    for (const s of fresh) seen[`${s.id}:${s.next.episode}`] = Date.now();
+    for (const [k, t] of Object.entries(seen)) if (Date.now() - t > 30 * 86400e3) delete seen[k];
+    store.set('aired', seen);
+    const s = fresh[0];
+    toast(fresh.length > 1 ? `New episodes are out: ${fresh.map((x) => x.title).join(', ')}` : `Episode ${s.next.episode} of ${s.title} is out`, {
+      label: 'Watch',
+      fn: () => window.api.watch(s.id),
+    });
+    window.api.refresh({ airing: true }).then((d) => {
+      S.data = d;
+      render();
+    }).catch(() => {});
   }
 
   // Takes a show off your AniList list (its progress and score there go too).
@@ -2621,6 +2660,7 @@ window.__require = require;
   setInterval(() => {
     for (const el of document.querySelectorAll('.rel[data-at]')) el.textContent = rel(Number(el.dataset.at));
     ticks += 1;
+    if (WEB) announceAired();
     if (ticks % 10 === 0 && S.data && !S.player && !S.detail && S.view !== 'settings' && document.activeElement?.id !== 'q' && document.activeElement?.tagName !== 'SELECT') renderContent();
   }, 60000);
 
