@@ -7,6 +7,12 @@ A Mac app and iPhone web app for keeping up with new anime, synced through your 
 - **My Shows** and **Airing Soon**: episode countdowns in your local time, with a notification when an episode airs.
 - **Watch** plays Crunchyroll inside the app window (no separate browser). It remembers where you stopped, so the button turns into **Resume** (episode and time). When you pass 90% of an episode, the next episode is counted and sent to your AniList list.
 
+## Download for Mac
+
+Get the latest **AniTrack for Mac** from the [mac-latest release](https://github.com/Xanderz99/anitrack/releases/tag/mac-latest): `AniTrack-mac-apple-silicon.zip` for M1 and later, `AniTrack-mac-intel.zip` for older Macs. Unzip it and drag AniTrack to Applications. The first time, macOS says it cannot check the app (it is not from the App Store): open System Settings > Privacy & Security and click **Open Anyway**.
+
+GitHub rebuilds it automatically whenever the app's code changes (`.github/workflows/mac-app.yml`). For an app that always matches the website instead, open the web app in Safari on a Mac and choose File > Add to Dock.
+
 ## Run it
 
 Needs Node.js 18+ on your Mac.

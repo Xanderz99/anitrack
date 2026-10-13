@@ -1,0 +1,62 @@
+name: mac-app
+# Builds AniTrack.app on a Mac whenever the app's code changes, for Apple Silicon and Intel, and
+# publishes both as the "AniTrack for Mac" download (release tag mac-latest, replaced each time).
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'renderer/**', 'build/**', 'package.json', 'scripts/build-app.sh', '.github/workflows/mac-app.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-app
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Test
+        run: npm test
+      # Each architecture needs its own Electron download, so install and build twice.
+      - name: Build for Apple Silicon
+        run: |
+          npm_config_arch=arm64 npm install --no-audit --no-fund
+          NO_INSTALL=1 bash scripts/build-app.sh
+          ditto -c -k --keepParent dist/AniTrack.app AniTrack-mac-apple-silicon.zip
+      - name: Build for Intel
+        run: |
+          rm -rf node_modules dist
+          npm_config_arch=x64 npm install --no-audit --no-fund
+          NO_INSTALL=1 bash scripts/build-app.sh
+          lipo -archs dist/AniTrack.app/Contents/MacOS/Electron | grep -q x86_64
+          ditto -c -k --keepParent dist/AniTrack.app AniTrack-mac-intel.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniTrack-mac
+          path: AniTrack-mac-*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: AniTrack-mac
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mac-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+          gh release create mac-latest AniTrack-mac-*.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "AniTrack for Mac" --notes "Download the zip for your Mac (Apple Silicon: M1 and later; Intel: older Macs), open it, and drag AniTrack to Applications.
+
+          The first time you open it, macOS will say it can't check the app (it isn't from the App Store). Go to System Settings > Privacy & Security, scroll down and click **Open Anyway**. You only need to do this once.
+
+          Built from $GITHUB_SHA."

@@ -41,6 +41,12 @@ fi
 xattr -cr "$OUT" 2>/dev/null || true
 codesign --force --deep --sign - "$OUT"
 
+# NO_INSTALL=1 (used by the GitHub build) stops here and leaves the app in dist/.
+if [ -n "${NO_INSTALL:-}" ]; then
+  echo "Built $OUT"
+  exit 0
+fi
+
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/AniTrack.app"
 cp -R "$OUT" "$HOME/Applications/"

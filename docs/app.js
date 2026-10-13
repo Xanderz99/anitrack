@@ -2033,6 +2033,11 @@ window.__require = require;
       return `
       ${accountSection(d)}
       <section class="section">
+        <h2>Mac app</h2>
+        <p class="note">AniTrack for Mac plays Crunchyroll in its own window, marks episodes as you finish them, and shows a countdown in the menu bar. It syncs with this app through your AniList account.</p>
+        <div class="field"><label>Download</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/mac-latest">Get AniTrack for Mac ↗</button></div><span class="hint">Or, in Safari on a Mac, open this page and choose File › Add to Dock.</span></div>
+      </section>
+      <section class="section">
         <h2>Watching on iPhone</h2>
         <p class="note">Watch opens the show on Crunchyroll. When you come back, AniTrack asks whether you finished the episode and marks it on AniList for you.</p>
         <p class="note">For a reminder when episodes air, use <b>Export calendar</b> on My Shows and choose Add All.</p>
