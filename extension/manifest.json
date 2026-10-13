@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "AniTrack for Crunchyroll",
+  "short_name": "AniTrack",
+  "version": "1.0.0",
+  "description": "Marks the Crunchyroll episodes you watch on your AniList list, near the end of each episode.",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": { "default_title": "AniTrack", "default_popup": "popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
+  "background": { "service_worker": "background.js", "scripts": ["match.js", "background.js"] },
+  "permissions": ["storage"],
+  "host_permissions": ["https://graphql.anilist.co/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.crunchyroll.com/*", "https://static.crunchyroll.com/*"],
+      "js": ["match.js", "content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://xanderz99.github.io/anitrack/*"],
+      "js": ["link.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": { "gecko": { "id": "anitrack@xanderz99.github.io", "strict_min_version": "121.0" } }
+}

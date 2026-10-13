@@ -31,6 +31,7 @@ function compactList(entries) {
     episodes: e.media.episodes,
     siteUrl: e.media.siteUrl,
     score: e.score,
+    genres: e.media.genres || [],
   }));
 }
 
@@ -181,6 +182,52 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     };
   }
 
+  /* ---------- your watch history on this device (for stats) ---------- */
+  // Each episode you mark here is logged as { t: seconds, id, n: episodes }. Undoing removes it again.
+  const LOG_MAX = 3000;
+  const logOf = () => (Array.isArray(space().log) ? space().log : []);
+  function logProgress(id, from, to) {
+    let log = logOf();
+    if (to > from) {
+      log.push({ t: Math.floor(now() / 1000), id, n: to - from });
+      if (log.length > LOG_MAX) log = log.slice(-LOG_MAX);
+    } else if (to < from) {
+      let undo = from - to;
+      for (let i = log.length - 1; i >= 0 && undo > 0; i -= 1) {
+        if (log[i].id !== id) continue;
+        const take = Math.min(undo, log[i].n);
+        log[i].n -= take;
+        undo -= take;
+        if (!log[i].n) log.splice(i, 1);
+      }
+    } else return;
+    tracking.set('log', log);
+  }
+  // Episodes this month and this week, the current daily streak and the last 14 days, in local time.
+  function activity() {
+    const log = logOf();
+    const d = new Date(now());
+    const dayKey = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+    const perDay = new Map();
+    for (const e of log) {
+      const k = dayKey(new Date(e.t * 1000));
+      perDay.set(k, (perDay.get(k) || 0) + e.n);
+    }
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+    const weekStart = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 6).getTime() / 1000;
+    const sum = (from) => log.filter((e) => e.t >= from).reduce((a, e) => a + e.n, 0);
+    const day = (back) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+    // A streak still counts today if you have not watched yet but did yesterday.
+    let streak = 0;
+    for (let back = perDay.has(dayKey(d)) ? 0 : 1; perDay.has(dayKey(day(back))); back += 1) streak += 1;
+    const days = [];
+    for (let back = 13; back >= 0; back -= 1) {
+      const x = day(back);
+      days.push({ t: Math.floor(x.getTime() / 1000), n: perDay.get(dayKey(x)) || 0 });
+    }
+    return { month: sum(monthStart), week: sum(weekStart), streak, days, logged: log.length > 0 };
+  }
+
   const pendingCount = () => Object.values(tracking.get('items')).filter((it) => it.dirty).length;
 
   // The part of the UI payload both platforms share; each adds its own settings/auth fields.
@@ -195,6 +242,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       pending: pendingCount(),
       guestItems: guestCount(),
       account: who()?.label || null,
+      activity: activity(),
     };
   }
 
@@ -398,6 +446,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   async function setTrack(id, patch) {
     id = Number(id);
     const items = tracking.get('items');
+    const before = meFor(id).progress;
     const next = { ...(items[id] || {}) };
     if ('status' in patch) {
       if (patch.status) next.status = patch.status;
@@ -419,6 +468,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     if (next.status == null && next.progress == null) delete items[id];
     else items[id] = next;
     tracking.set('items', items);
+    if ('progress' in patch) logProgress(id, before, next.progress);
     const fromSearch = found.get(id);
     if (fromSearch && next.status && !allRaw().some((r) => r.id === id)) S.extra.push(fromSearch);
     const push = await pushToAniList(id, patch, next);
@@ -428,7 +478,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       else if (push.reason !== 'local-only' && ('progress' in patch || (patch.status && patch.status !== 'SKIP'))) item.dirty = true;
       tracking.set('items', tracking.get('items'));
     }
-    return { me: meFor(id), ...push };
+    return { me: meFor(id), activity: activity(), ...push };
   }
 
   /* ---------- search all of AniList ---------- */
@@ -483,6 +533,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       trailer: trailerUrl(raw.trailer),
       related,
       season: raw.startDate?.year || null,
+      // A sequel you have not started whose earlier season you have not finished: the page hides its
+      // synopsis until tapped.
+      spoiler: !['WATCHING', 'COMPLETED'].includes(meFor(id).status) && (raw.relations?.edges || []).some((e) => e.relationType === 'PREQUEL' && e.node?.type === 'ANIME' && !['COMPLETED', 'REPEATING'].includes(S.listMap[e.node.id]?.status) && meFor(e.node.id).status !== 'COMPLETED'),
     };
   }
 
@@ -548,7 +601,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, activity, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */

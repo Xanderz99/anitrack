@@ -413,3 +413,59 @@ test('if the quick airing refresh fails, a full load is tried instead', async ()
   assert.strictEqual(full, 1);
   assert.strictEqual(core.S.errors.season, undefined);
 });
+
+test('watch log: episodes this week/month and a daily streak; undo takes them back', async () => {
+  let t = new Date(2026, 9, 6, 20).getTime();
+  const { core } = setup({ now: () => t });
+  await core.refresh({});
+  await core.setTrack(1, { progress: 2 }); // Oct 6
+  t = new Date(2026, 9, 7, 21).getTime();
+  await core.setTrack(1, { progress: 3 }); // Oct 7
+  t = new Date(2026, 9, 8, 9).getTime();
+  let a = core.activity();
+  assert.strictEqual(a.month, 3);
+  assert.strictEqual(a.streak, 2, 'nothing yet today, but yesterday keeps the streak alive');
+  assert.strictEqual(a.days.length, 14);
+  assert.strictEqual(a.days.at(-2).n, 1);
+  const r = await core.setTrack(2, { progress: 1 });
+  assert.strictEqual(r.activity.streak, 3);
+  await core.setTrack(2, { progress: 0 }); // undo
+  a = core.activity();
+  assert.strictEqual(a.month, 3);
+  assert.strictEqual(a.streak, 2);
+  await core.setTrack(1, { status: 'PAUSED' });
+  assert.strictEqual(core.activity().month, 3, 'a status change is not an episode');
+  t = new Date(2026, 10, 2).getTime();
+  assert.deepStrictEqual([core.activity().month, core.activity().streak], [0, 0], 'a new month and a broken streak');
+});
+
+test('the watch log belongs to the account that watched', async () => {
+  const { core, settings } = setup();
+  await core.refresh({});
+  await core.setTrack(1, { progress: 1 });
+  assert.strictEqual(core.activity().month, 1);
+  settings.patch({ viewerId: 8 });
+  assert.strictEqual(core.activity().month, 0);
+});
+
+test('list entries carry genres (for stats)', async () => {
+  const entry = listEntry(1, 'COMPLETED', 12, 9);
+  entry.media.genres = ['Action', 'Drama'];
+  const { core } = setup({ list: [entry] });
+  await core.refresh({});
+  assert.deepStrictEqual(core.basePayload().list[0].genres, ['Action', 'Drama']);
+});
+
+test('details flag spoilers for a sequel whose earlier season you have not finished', async () => {
+  const relations = { edges: [{ relationType: 'PREQUEL', node: { id: 3, type: 'ANIME', title: { romaji: 'S1' } } }] };
+  const { core, AL } = setup({ list: [listEntry(3, 'CURRENT', 4)], shows: [media(1), media(2)] });
+  AL.fetchDetails = async (id) => media(id, id === 1 ? { relations } : {});
+  await core.refresh({});
+  assert.strictEqual((await core.details(1)).spoiler, true, 'season 1 not finished');
+  assert.strictEqual((await core.details(2)).spoiler, false, 'no earlier season');
+  await core.setTrack(1, { progress: 1 });
+  assert.strictEqual((await core.details(1)).spoiler, false, 'you already started it');
+  await core.setTrack(1, { progress: 0, status: null });
+  await core.setTrack(3, { progress: 12 });
+  assert.strictEqual((await core.details(1)).spoiler, false, 'season 1 finished');
+});

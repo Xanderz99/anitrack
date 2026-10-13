@@ -1,0 +1,38 @@
+name: extension
+# Zips the browser extension (extension/) whenever it changes and publishes it as the
+# "AniTrack for Crunchyroll" download (release tag extension-latest, replaced each time).
+on:
+  push:
+    branches: [main]
+    paths: ['extension/**', '.github/workflows/extension.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extension
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test
+        run: node --test test/extension.test.js
+      - name: Zip
+        run: cd extension && zip -r -X ../AniTrack-extension.zip .
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete extension-latest --repo "$GITHUB_REPOSITORY" --cleanup-tag -y || true
+          gh release create extension-latest AniTrack-extension.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "AniTrack for Crunchyroll (browser extension)" --notes "Marks the Crunchyroll episodes you watch in Chrome, Edge, Brave or Firefox on your AniList list.
+
+          Chrome, Edge, Brave: unzip, open chrome://extensions, turn on Developer mode, click Load unpacked and choose the unzipped folder.
+          Firefox: open about:debugging, This Firefox, Load Temporary Add-on, and choose manifest.json in the unzipped folder (it stays until Firefox restarts)."

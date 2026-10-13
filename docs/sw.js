@@ -4,7 +4,7 @@
 // and iOS often empties a Home Screen app's normal browser cache, which made every launch re-download them.
 // The build replaces __BUILD__ with a hash of the app files, so every release is a new service worker
 // with a fresh cache, and the old release's files are deleted when it takes over.
-const CACHE = 'anitrack-50b239b781';
+const CACHE = 'anitrack-c59f29e0fe';
 const IMAGES = 'anitrack-img-v3';
 const MAX_IMAGES = 600; // roughly 30 MB of posters; the oldest are dropped first
 const SHELL = ['./', 'index.html', 'boot.js', 'app.js', 'styles.css', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];

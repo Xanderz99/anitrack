@@ -21,6 +21,17 @@ If Crunchyroll says a video is "not available" inside the app, its copy protecti
 
 GitHub rebuilds it automatically whenever the app's code changes (`.github/workflows/mac-app.yml`). For an app that always matches the website instead, open the web app in Safari on a Mac and choose File > Add to Dock.
 
+## Browser extension for crunchyroll.com
+
+Watching on crunchyroll.com in Chrome, Edge, Brave or Firefox? The **AniTrack for Crunchyroll** extension marks each episode watched on your AniList list when you reach 85% of it (adjustable), with an **Undo** button on the page. Get `AniTrack-extension.zip` from the [extension-latest release](https://github.com/Xanderz99/anitrack/releases/tag/extension-latest) and unzip it.
+
+- **Chrome, Edge, Brave**: open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and choose the unzipped folder.
+- **Firefox**: open `about:debugging`, choose **This Firefox > Load Temporary Add-on** and pick `manifest.json` in the folder (Firefox removes it again when it restarts).
+
+Click the AniTrack icon in the toolbar and choose **Connect with AniTrack**: it opens the web app, and once you are logged in there the extension connects by itself. It only takes the login when you press Connect. You can paste a login code instead.
+
+It reads the show name and episode number from the page and finds the show on your list (Watching, Planning, Paused or Rewatching), picking the right season. If it guesses wrong, or Crunchyroll spells the title differently, choose the show in the extension's menu. That choice is remembered for that season, along with the episode Crunchyroll starts counting from (for example 13 for a second half). It never lowers your progress and never marks past a show's last episode. The extension talks only to AniList; its code is in `extension/`. Like the Mac app's auto-marking, it depends on Crunchyroll's page layout and was tested against a mock of it, not the live site.
+
 ## Run it
 
 Needs Node.js 22.12 or later on your Mac (the Widevine Electron build requires it).
@@ -94,6 +105,9 @@ Run `npm test` to run the tests (taste matching, dub matching, the AniList clien
 - **Rate when you finish**: marking the last episode asks for a 1-10 score, saved to AniList (it also sharpens For You).
 - **Show details**: tap a poster or title for the full synopsis, trailer, where to watch, episode progress and status, and related seasons (tap one to jump to it).
 - **Pull down to refresh** on iPhone. Countdowns tick live without redrawing the page.
+- **Notifications** (the bell): episodes out for shows you watch, and what airs in the next 24 hours. A badge counts new ones since you last looked.
+- **Spoiler guard**: a sequel's synopsis stays blurred until you tap it, unless you finished the season before (or already started the sequel). Turn it off in Settings.
+- **Your stats** (My List > More stats): episodes this week and month, your daily streak and the last 14 days (from episodes you mark in AniTrack on that device), top genres and your top-rated shows.
 - **Every legal service**: cards list where a show streams. Shows that are not on Crunchyroll open on the service that has them (Netflix, HIDIVE and so on).
 - Shortcuts: ⌘1–⌘8 switch views, `/` or ⌘F search, Esc closes the player or clears search.
 

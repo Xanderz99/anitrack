@@ -443,6 +443,7 @@ function compactList(entries) {
     episodes: e.media.episodes,
     siteUrl: e.media.siteUrl,
     score: e.score,
+    genres: e.media.genres || [],
   }));
 }
 
@@ -593,6 +594,52 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     };
   }
 
+  /* ---------- your watch history on this device (for stats) ---------- */
+  // Each episode you mark here is logged as { t: seconds, id, n: episodes }. Undoing removes it again.
+  const LOG_MAX = 3000;
+  const logOf = () => (Array.isArray(space().log) ? space().log : []);
+  function logProgress(id, from, to) {
+    let log = logOf();
+    if (to > from) {
+      log.push({ t: Math.floor(now() / 1000), id, n: to - from });
+      if (log.length > LOG_MAX) log = log.slice(-LOG_MAX);
+    } else if (to < from) {
+      let undo = from - to;
+      for (let i = log.length - 1; i >= 0 && undo > 0; i -= 1) {
+        if (log[i].id !== id) continue;
+        const take = Math.min(undo, log[i].n);
+        log[i].n -= take;
+        undo -= take;
+        if (!log[i].n) log.splice(i, 1);
+      }
+    } else return;
+    tracking.set('log', log);
+  }
+  // Episodes this month and this week, the current daily streak and the last 14 days, in local time.
+  function activity() {
+    const log = logOf();
+    const d = new Date(now());
+    const dayKey = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+    const perDay = new Map();
+    for (const e of log) {
+      const k = dayKey(new Date(e.t * 1000));
+      perDay.set(k, (perDay.get(k) || 0) + e.n);
+    }
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+    const weekStart = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 6).getTime() / 1000;
+    const sum = (from) => log.filter((e) => e.t >= from).reduce((a, e) => a + e.n, 0);
+    const day = (back) => new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+    // A streak still counts today if you have not watched yet but did yesterday.
+    let streak = 0;
+    for (let back = perDay.has(dayKey(d)) ? 0 : 1; perDay.has(dayKey(day(back))); back += 1) streak += 1;
+    const days = [];
+    for (let back = 13; back >= 0; back -= 1) {
+      const x = day(back);
+      days.push({ t: Math.floor(x.getTime() / 1000), n: perDay.get(dayKey(x)) || 0 });
+    }
+    return { month: sum(monthStart), week: sum(weekStart), streak, days, logged: log.length > 0 };
+  }
+
   const pendingCount = () => Object.values(tracking.get('items')).filter((it) => it.dirty).length;
 
   // The part of the UI payload both platforms share; each adds its own settings/auth fields.
@@ -607,6 +654,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       pending: pendingCount(),
       guestItems: guestCount(),
       account: who()?.label || null,
+      activity: activity(),
     };
   }
 
@@ -810,6 +858,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
   async function setTrack(id, patch) {
     id = Number(id);
     const items = tracking.get('items');
+    const before = meFor(id).progress;
     const next = { ...(items[id] || {}) };
     if ('status' in patch) {
       if (patch.status) next.status = patch.status;
@@ -831,6 +880,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
     if (next.status == null && next.progress == null) delete items[id];
     else items[id] = next;
     tracking.set('items', items);
+    if ('progress' in patch) logProgress(id, before, next.progress);
     const fromSearch = found.get(id);
     if (fromSearch && next.status && !allRaw().some((r) => r.id === id)) S.extra.push(fromSearch);
     const push = await pushToAniList(id, patch, next);
@@ -840,7 +890,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       else if (push.reason !== 'local-only' && ('progress' in patch || (patch.status && patch.status !== 'SKIP'))) item.dirty = true;
       tracking.set('items', tracking.get('items'));
     }
-    return { me: meFor(id), ...push };
+    return { me: meFor(id), activity: activity(), ...push };
   }
 
   /* ---------- search all of AniList ---------- */
@@ -895,6 +945,9 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       trailer: trailerUrl(raw.trailer),
       related,
       season: raw.startDate?.year || null,
+      // A sequel you have not started whose earlier season you have not finished: the page hides its
+      // synopsis until tapped.
+      spoiler: !['WATCHING', 'COMPLETED'].includes(meFor(id).status) && (raw.relations?.edges || []).some((e) => e.relationType === 'PREQUEL' && e.node?.type === 'ANIME' && !['COMPLETED', 'REPEATING'].includes(S.listMap[e.node.id]?.status) && meFor(e.node.id).status !== 'COMPLETED'),
     };
   }
 
@@ -960,7 +1013,7 @@ function createCore({ AL, settings, tracking: store, cache, dubMatch = () => nul
       .sort((a, b) => a.at - b.at);
   }
 
-  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, setViewer, adoptGuest, accountKey };
+  return { S, tracking, allRaw, findRaw, meFor, enrich, basePayload, pendingCount, loadFromCache, refresh, setTrack, removeFromList, search, rate, details, upcoming, activity, setViewer, adoptGuest, accountKey };
 }
 
 /* ---------- calendar (.ics) ---------- */
@@ -1372,6 +1425,7 @@ window.__require = require;
     check: svg('<path d="M5 12.5 10 17l9-10"/>'),
     plus: svg('<path d="M12 5v14M5 12h14"/>'),
     info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>'),
+    bell: svg('<path d="M18 8.5a6 6 0 0 0-12 0c0 6.5-3 8.5-3 8.5h18s-3-2-3-8.5M10.3 20.5a2 2 0 0 0 3.4 0"/>'),
   };
   const SORTS = { popular: 'Popular', match: 'Best match', score: 'Rating', airing: 'Airing soon', az: 'A–Z' };
   const TIMES = [
@@ -1395,6 +1449,7 @@ window.__require = require;
     shownSyncHint: false,
     player: null,
     listTab: store.get('listTab', 'WATCHING'),
+    revealed: new Set(), // sequels whose synopsis you chose to see this session
   };
   if (!VIEWS.some((v) => v.id === S.view)) S.view = 'home';
 
@@ -1431,6 +1486,41 @@ window.__require = require;
   const LIST_TABS = ['WATCHING', 'PLANNING', 'PAUSED', 'DROPPED', 'COMPLETED'];
   const listStatus = (e) => (LIST_TABS.includes(e.me.status) ? e.me.status : 'PLANNING');
   const aired = (s) => (s.next ? s.next.episode - 1 : s.airStatus === 'FINISHED' ? s.episodes : null);
+
+  /* ---------- notification centre ---------- */
+  // What is out for shows you watch, and what airs in the next day. AniList only gives the next airing
+  // time, so the latest episode is taken to have come out a week before it (weekly shows).
+  function inbox() {
+    if (!S.data) return { ready: [], soon: [], fresh: 0 };
+    const nowS = Date.now() / 1000;
+    let seen = store.get('bellSeen', null);
+    if (seen == null) store.set('bellSeen', (seen = Math.floor(nowS - 86400))); // first time: only the last day counts as new
+    const ready = S.data.shows
+      .filter((s) => s.me.status === 'WATCHING' && aired(s) != null && aired(s) > s.me.progress)
+      .map((s) => ({ s, waiting: aired(s) - s.me.progress, out: s.next && s.next.episode > 1 ? s.next.airingAt - 7 * 86400 : null }))
+      .sort((a, b) => (b.out || 0) - (a.out || 0));
+    const soon = S.data.shows
+      .filter((s) => s.next && ['WATCHING', 'PLANNING'].includes(s.me.status) && s.next.airingAt > nowS && s.next.airingAt < nowS + 86400)
+      .sort((a, b) => a.next.airingAt - b.next.airingAt);
+    return { ready, soon, fresh: ready.filter((x) => x.out && x.out > seen && x.out <= nowS).length };
+  }
+  function bellSheet() {
+    const { ready, soon } = inbox();
+    store.set('bellSeen', Math.floor(Date.now() / 1000));
+    const row = (s, sub, act) => `<div class="n-row" data-id="${s.id}">
+        <button class="n-cover" data-act="details" aria-label="${esc(s.title)}: details" style="${s.color ? `background:${esc(s.color)}` : ''}">${s.cover ? img(s.cover, true) : ''}</button>
+        <button class="n-text" data-act="details"><b>${esc(s.title)}</b><span>${sub}</span></button>${act}</div>`;
+    const readyHtml = ready
+      .map(({ s, waiting, out }) => row(s, `${waiting > 1 ? `${waiting} episodes ready` : `Episode ${s.me.progress + 1} is out`}${out && out <= Date.now() / 1000 ? ` · ${rel(out)}` : ''}`, `<button class="btn small primary" data-act="watch">Watch</button>`))
+      .join('');
+    const soonHtml = soon.map((s) => row(s, `Episode ${s.next.episode} · ${timeFmt.format(new Date(s.next.airingAt * 1000))} · ${relSpan(s.next.airingAt)}`, '')).join('');
+    openSheet(`<h2>Notifications</h2>
+      ${readyHtml ? `<h3>Ready to watch</h3><div class="n-list">${readyHtml}</div>` : ''}
+      ${soonHtml ? `<h3>Airing in the next 24 hours</h3><div class="n-list">${soonHtml}</div>` : ''}
+      ${readyHtml || soonHtml ? '' : '<p class="note">You are all caught up. New episodes of shows you watch show up here.</p>'}
+      <div class="sheet-foot"><span class="hint">Times are estimates for weekly shows.</span><button class="link" data-sheet-close>Close</button></div>`).classList.add('bell-sheet');
+    renderBar();
+  }
 
   /* ---------- filtering ---------- */
   function passes(s, opts = {}) {
@@ -1697,6 +1787,10 @@ window.__require = require;
     }
     if (ctl) html += `<div class="filters">${ctl}</div>`;
     html += '<span class="spacer"></span>';
+    if (S.data && !S.data.loading && S.view !== 'settings' && !S.data.firstRun) {
+      const n = inbox().fresh;
+      html += `<button class="btn small bell" data-act="bell" aria-label="Notifications${n ? `, ${n} new` : ''}" title="Notifications">${ICON.bell}${n ? `<span class="dot-n">${n > 9 ? '9+' : n}</span>` : ''}</button>`;
+    }
     if (WEB && S.view !== 'settings') html += `<button class="btn small narrow-only gear" data-nav="settings" aria-label="Settings">${VIEWS.find((v) => v.id === 'settings').ico}</button>`;
     if (!['settings', 'tonight', 'home'].includes(S.view)) html += `<input type="search" id="q" placeholder="Search" value="${esc(f.q)}" aria-label="Search shows">`;
     $('#bar').innerHTML = html;
@@ -1847,8 +1941,36 @@ window.__require = require;
     const mean = scored.length ? scored.reduce((n, e) => n + e.score, 0) / scored.length : 0;
     const stat = (value, label) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
     const stats = `<div class="stats">${stat(eps.toLocaleString(), 'episodes')}${stat(`~${Math.round((eps * 24) / 60).toLocaleString()}`, 'hours')}${stat(done, 'completed')}${stat(mean ? mean.toFixed(1) : '–', 'avg score')}</div>`;
-    const head = `<p class="note"><b>${esc(d.account)}</b> on AniList · ${d.list.length} anime. ${d.auth.loggedIn ? 'Changes here are saved to your AniList.' : 'Log in to save changes to AniList.'}</p>${stats}`;
+    const head = `<p class="note"><b>${esc(d.account)}</b> on AniList · ${d.list.length} anime. ${d.auth.loggedIn ? 'Changes here are saved to your AniList.' : 'Log in to save changes to AniList.'}</p>${stats}<button class="btn small more-stats" data-act="stats">More stats ›</button>`;
     return head + (items.length ? `<div class="rows">${items.map(listRow).join('')}</div>` : '<div class="empty">Nothing here.</div>');
+  }
+
+  // Your habits (from what you mark in AniTrack on this device) and your taste (from your AniList list).
+  function statsSheet() {
+    const d = S.data;
+    const a = d.activity || { month: 0, week: 0, streak: 0, days: [], logged: false };
+    const stat = (value, label) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
+    const max = Math.max(1, ...a.days.map((x) => x.n));
+    const bars = a.days
+      .map((x) => `<span class="bar-d" title="${esc(dayFmt.format(new Date(x.t * 1000)))}: ${x.n} episode${x.n === 1 ? '' : 's'}"><i style="height:${Math.round((x.n / max) * 100)}%"></i></span>`)
+      .join('');
+    const watched = d.list.filter((e) => ['WATCHING', 'COMPLETED', 'PAUSED'].includes(e.me.status) || e.me.progress > 0);
+    const genreN = {};
+    for (const e of watched) for (const g of e.genres || []) genreN[g] = (genreN[g] || 0) + 1;
+    const genres = Object.entries(genreN).sort((x, y) => y[1] - x[1]).slice(0, 6);
+    const gmax = genres[0]?.[1] || 1;
+    const genreHtml = genres
+      .map(([g, n]) => `<div class="g-row"><span>${esc(g)}</span><span class="track"><i style="width:${Math.round((n / gmax) * 100)}%"></i></span><b>${n}</b></div>`)
+      .join('');
+    const top = d.list.filter((e) => e.score > 0).sort((x, y) => y.score - x.score || x.title.localeCompare(y.title)).slice(0, 10);
+    const topHtml = top.map((e, i) => `<li data-id="${e.id}"><button class="link" data-act="details"><span class="rank">${i + 1}</span>${esc(e.title)}</button><b>${e.score}</b></li>`).join('');
+    openSheet(`<h2>Your stats</h2>
+      <h3>Watching</h3>
+      <div class="stats">${stat(a.week, 'episodes this week')}${stat(a.month, `in ${esc(new Intl.DateTimeFormat(undefined, { month: 'long' }).format(new Date()))}`)}${stat(a.streak, 'day streak')}</div>
+      ${a.logged ? `<div class="days" aria-label="Episodes per day, last 14 days">${bars}</div>` : '<p class="hint">Counts episodes you mark as watched in AniTrack on this device, from now on.</p>'}
+      ${genreHtml ? `<h3>Top genres</h3><div class="genres">${genreHtml}</div>` : ''}
+      ${topHtml ? `<h3>Top rated</h3><ol class="top">${topHtml}</ol>` : ''}
+      <div class="sheet-foot"><span class="hint">Genres and scores come from your AniList list.</span><button class="link" data-sheet-close>Close</button></div>`).classList.add('stats-sheet');
   }
 
   function renderContent() {
@@ -2005,6 +2127,10 @@ window.__require = require;
 
   function deviceSection() {
     return `<section class="section">
+        <h2>Spoilers</h2>
+        <div class="field"><label for="hideSpoilers">Synopses</label><label><input type="checkbox" id="hideSpoilers" ${store.get('hideSpoilers', true) ? 'checked' : ''}> Hide the synopsis of a sequel until you finish the season before it</label></div>
+      </section>
+      <section class="section">
         <h2>Privacy</h2>
         <p class="note">AniTrack has no servers. It talks only to AniList${WEB ? '' : ' and Crunchyroll'}, and keeps everything else on this device.</p>
         <div class="field"><label>This device</label><div><button class="btn small danger" data-act="resetDevice">Remove all AniTrack data from this ${WEB ? 'browser' : 'Mac'}</button></div><span class="hint">Logs out and clears local tracking and caches. Useful on a shared device. Nothing on AniList is deleted.</span></div>
@@ -2033,9 +2159,10 @@ window.__require = require;
       return `
       ${accountSection(d)}
       <section class="section">
-        <h2>Mac app</h2>
+        <h2>On a computer</h2>
         <p class="note">AniTrack for Mac plays Crunchyroll in its own window, marks episodes as you finish them, and shows a countdown in the menu bar. It syncs with this app through your AniList account.</p>
         <div class="field"><label>Download</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/mac-latest">Get AniTrack for Mac ↗</button></div><span class="hint">Or, in Safari on a Mac, open this page and choose File › Add to Dock.</span></div>
+        <div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/extension-latest">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Chrome, Edge, Brave or Firefox on a computer: marks episodes on AniList as you watch them on crunchyroll.com.</span></div>
       </section>
       <section class="section">
         <h2>Watching on iPhone</h2>
@@ -2257,7 +2384,7 @@ window.__require = require;
         ${actsHtml(d)}
         ${nextLine(d)}
         ${pct ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${d.me.progress}${d.episodes ? ` of ${d.episodes}` : ''} watched</span></div>` : ''}
-        ${d.synopsis ? `<p class="synopsis">${esc(d.synopsis)}</p>` : ''}
+        ${d.synopsis ? (d.spoiler && store.get('hideSpoilers', true) && !S.revealed.has(d.id) ? `<button class="synopsis spoiler" data-act="reveal" aria-label="Show the synopsis. It may spoil the earlier season."><span class="blur" aria-hidden="true">${esc(d.synopsis.slice(0, 400))}</span><span class="spoiler-tag">May spoil the earlier season · tap to show</span></button>` : `<p class="synopsis">${esc(d.synopsis)}</p>`) : ''}
         ${d.genres.length ? `<div class="chips">${d.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
         ${streams ? `<h3>Where to watch</h3><div class="d-row">${streams}</div>` : ''}
         ${d.trailer ? `<h3>Trailer</h3><div class="d-row"><button class="btn small" data-act="ext" data-url="${esc(d.trailer)}">▶ Watch the trailer ↗</button></div>` : ''}
@@ -2389,6 +2516,7 @@ window.__require = require;
     const wasListed = !!(s || l).me.inList;
     const r = await window.api.setTrack(id, patch);
     for (const x of [byId(id), found, l, det]) if (x) x.me = r.me;
+    if (r.activity) S.data.activity = r.activity;
     // A show added from search: reload so it appears in My Shows and the other views straight away.
     if (found && !byId(id)) S.data = await window.api.refresh({});
     if (r.me.status === 'COMPLETED' && before.status !== 'COMPLETED' && S.data.auth.loggedIn && !noUndo) setTimeout(() => rateSheet(id, (s || l).title), 600);
@@ -2537,10 +2665,15 @@ window.__require = require;
     const cardEl = btn.closest('[data-id]');
     const id = cardEl ? Number(cardEl.dataset.id) : null;
     const s = id ? anyById(id) : null;
-    if (act === 'details' && id) openDetails(id);
+    if (act === 'bell') bellSheet();
+    else if (act === 'stats') statsSheet();
+    else if (act === 'reveal' && S.detail) {
+      S.revealed.add(S.detail.id);
+      renderDetails();
+    } else if (act === 'details' && id) openDetails(id);
     else if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watch' && id) {
-      if (S.detail) closeSheet();
+      if (document.querySelector('.sheet-back')) closeSheet();
       const r = await window.api.watch(id);
       if (r.ok && r.external && s) {
         S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
@@ -2570,6 +2703,11 @@ window.__require = require;
       const id = Number(t.closest('[data-id]').dataset.id);
       if (t.value === 'REMOVE') removeShow(id, true);
       else applyTrack(id, { status: t.value || null });
+      return;
+    }
+    if (t.id === 'hideSpoilers') {
+      store.set('hideSpoilers', t.checked);
+      toast('Saved');
       return;
     }
     if (!S.data || S.view !== 'settings') return;
