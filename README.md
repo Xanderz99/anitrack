@@ -15,7 +15,7 @@ GitHub rebuilds it automatically whenever the app's code changes (`.github/workf
 
 ## Run it
 
-Needs Node.js 18+ on your Mac.
+Needs Node.js 22.12 or later on your Mac (the Widevine Electron build requires it).
 
     cd anitrack
     npm install

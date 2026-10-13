@@ -9,8 +9,11 @@ for p in /opt/homebrew/bin /usr/local/bin; do [ -d "$p" ] && PATH="$p:$PATH"; do
 command -v npm >/dev/null 2>&1 || { echo "Node.js was not found. Install it from https://nodejs.org and try again."; exit 1; }
 
 SRC="node_modules/electron/dist/Electron.app"
-[ -d "$SRC" ] || npm install
-[ -d "$SRC" ] || { echo "Could not find $SRC after npm install."; exit 1; }
+[ -d node_modules/electron ] || npm install
+# The castlabs (Widevine) Electron package does not download itself on npm install; its installer
+# fetches the framework for this Mac (or for npm_config_arch, when building for the other kind of Mac).
+[ -d "$SRC" ] || node node_modules/electron/install.js
+[ -d "$SRC" ] || { echo "Could not download Electron into $SRC."; exit 1; }
 
 OUT="dist/AniTrack.app"
 rm -rf dist && mkdir -p dist
