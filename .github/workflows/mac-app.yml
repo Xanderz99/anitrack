@@ -37,7 +37,7 @@ jobs:
         if: env.EVS_ACCOUNT_NAME != ''
         run: |
           python -m pip install --upgrade castlabs-evs
-          python -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
+          python -m castlabs_evs.account -n reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
           echo "VMP_SIGN=1" >> "$GITHUB_ENV"
       # Each architecture needs its own Electron download, so install and build twice.
       - name: Build for Apple Silicon

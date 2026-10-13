@@ -46,7 +46,7 @@ xattr -cr "$OUT" 2>/dev/null || true
 # Uses castlabs' free EVS service: VMP_SIGN=1 after logging in with `python3 -m castlabs_evs.account reauth`.
 # It has to come before the Apple signature below.
 if [ -n "${VMP_SIGN:-}" ]; then
-  python3 -m castlabs_evs.vmp sign-pkg "$OUT"
+  python3 -m castlabs_evs.vmp -n sign-pkg "$OUT"
 fi
 
 # Changing the bundle breaks its original signature; an ad-hoc signature lets macOS run it.

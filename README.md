@@ -13,7 +13,9 @@ Get the latest **AniTrack for Mac** from the [mac-latest release](https://github
 
 If Crunchyroll says a video is "not available" inside the app, its copy protection (Widevine) is refusing an app without a Widevine signature. Either choose **Settings > Play Crunchyroll in > Your web browser**, or add the signature (free, about five minutes, once):
 
-1. On any computer with Python: `python3 -m pip install castlabs-evs`, then `python3 -m castlabs_evs.account signup` and follow the prompts (it emails you a code).
+1. In Terminal on your Mac (a private Python environment avoids macOS refusing the install):
+   `python3 -m venv ~/evs && ~/evs/bin/pip install castlabs-evs && ~/evs/bin/python -m castlabs_evs.account signup`
+   Answer the prompts (account name, password, email, name); it emails you a code to type in.
 2. On GitHub, open the repository's **Settings > Secrets and variables > Actions** and add two secrets: `EVS_ACCOUNT_NAME` (your EVS account name) and `EVS_PASSWD` (its password).
 3. Under **Actions > mac-app**, press **Run workflow**. The new download is signed for Widevine.
 
