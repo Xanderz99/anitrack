@@ -339,7 +339,7 @@
 
   function renderBar() {
     if (S.player) {
-      $('#bar').innerHTML = `<button class="btn" data-act="closePlayer">← Library</button><h1>${esc(S.player.title)}</h1><span class="spacer"></span><button class="btn small" data-act="playerExt">Open in browser</button>`;
+      $('#bar').innerHTML = `<button class="btn" data-act="closePlayer">← Library</button><h1>${esc(S.player.title)}</h1><span class="spacer"></span><span class="sub">Video not playing?</span><button class="btn small" data-act="playerExt">Open in browser</button>`;
       return;
     }
     const v = VIEWS.find((x) => x.id === S.view);
@@ -723,6 +723,9 @@
         <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
           .map((v) => `<option value="${v}" ${Number(st.autoMarkPct) === v ? 'selected' : ''}>${Math.round(v * 100)}% of the episode</option>`)
           .join('')}</select><span class="hint">Applies when you watch in the Crunchyroll window. The next episode is counted and sent to AniList.</span></div>
+        <div class="field"><label for="playIn">Play Crunchyroll in</label><select id="playIn">${[['app', 'AniTrack window'], ['browser', 'Your web browser']]
+          .map(([v, l]) => `<option value="${v}" ${(st.playIn || 'app') === v ? 'selected' : ''}>${l}</option>`)
+          .join('')}</select><span class="hint">If Crunchyroll says a video is not available in AniTrack, choose your browser. In the browser, AniTrack asks whether you finished the episode when you come back, instead of marking it by itself.</span></div>
         <div class="field"><label for="notify">Notifications</label><label><input type="checkbox" id="notify" ${st.notify ? 'checked' : ''}> Tell me when an episode of a Watching or Planning show airs</label></div>
         <div class="field"><label>Crunchyroll playback</label><div>${
           d.drm
@@ -1245,6 +1248,7 @@
     else if (t.id === 'clientId') patch.clientId = t.value;
     else if (t.id === 'notify') patch.notify = t.checked;
     else if (t.id === 'autoMark') patch.autoMarkPct = Number(t.value);
+    else if (t.id === 'playIn') patch.playIn = t.value;
     else return;
     S.data = await window.api.saveSettings(patch);
     toast('Saved');
@@ -1318,6 +1322,7 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') setTimeout(askPending, 600);
   });
+  window.addEventListener('focus', () => setTimeout(askPending, 600)); // the Mac window stays "visible" behind the browser
 
   window.api.on('data', (d) => {
     S.data = d;

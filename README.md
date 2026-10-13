@@ -11,6 +11,12 @@ A Mac app and iPhone web app for keeping up with new anime, synced through your 
 
 Get the latest **AniTrack for Mac** from the [mac-latest release](https://github.com/Xanderz99/anitrack/releases/tag/mac-latest): `AniTrack-mac-apple-silicon.zip` for M1 and later, `AniTrack-mac-intel.zip` for older Macs. Unzip it and drag AniTrack to Applications. The first time, macOS says it cannot check the app (it is not from the App Store): open System Settings > Privacy & Security and click **Open Anyway**.
 
+If Crunchyroll says a video is "not available" inside the app, its copy protection (Widevine) is refusing an app without a Widevine signature. Either choose **Settings > Play Crunchyroll in > Your web browser**, or add the signature (free, about five minutes, once):
+
+1. On any computer with Python: `python3 -m pip install castlabs-evs`, then `python3 -m castlabs_evs.account signup` and follow the prompts (it emails you a code).
+2. On GitHub, open the repository's **Settings > Secrets and variables > Actions** and add two secrets: `EVS_ACCOUNT_NAME` (your EVS account name) and `EVS_PASSWD` (its password).
+3. Under **Actions > mac-app**, press **Run workflow**. The new download is signed for Widevine.
+
 GitHub rebuilds it automatically whenever the app's code changes (`.github/workflows/mac-app.yml`). For an app that always matches the website instead, open the web app in Safari on a Mac and choose File > Add to Dock.
 
 ## Run it

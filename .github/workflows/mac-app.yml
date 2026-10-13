@@ -17,6 +17,11 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      # Optional: a castlabs EVS account (free) adds the Widevine signature Crunchyroll needs to play
+      # video inside the app. Add these as repository secrets; without them the app is built unsigned.
+      EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+      EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +29,16 @@ jobs:
           node-version: 22 # the Widevine Electron build needs Node 22.12 or later
       - name: Test
         run: npm test
+      - uses: actions/setup-python@v5
+        if: env.EVS_ACCOUNT_NAME != ''
+        with:
+          python-version: '3.12'
+      - name: Log in to castlabs EVS (Widevine signing)
+        if: env.EVS_ACCOUNT_NAME != ''
+        run: |
+          python -m pip install --upgrade castlabs-evs
+          python -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
+          echo "VMP_SIGN=1" >> "$GITHUB_ENV"
       # Each architecture needs its own Electron download, so install and build twice.
       - name: Build for Apple Silicon
         run: |

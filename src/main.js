@@ -58,7 +58,7 @@ const baseUrl = (u) => String(u || '').split(/[?#]/)[0];
 function payload() {
   return {
     ...core.basePayload({ resumeFor }),
-    settings: { userName: settings.get('userName'), clientId: settings.get('clientId'), notify: settings.get('notify'), autoMarkPct: settings.get('autoMarkPct') },
+    settings: { userName: settings.get('userName'), clientId: settings.get('clientId'), notify: settings.get('notify'), autoMarkPct: settings.get('autoMarkPct'), playIn: settings.get('playIn') },
     auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId },
     firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
     drm: !!components,
@@ -207,6 +207,12 @@ async function openPlayer(id) {
     url = saved.url; // pick up the episode you were in the middle of
     ctx.resumeUrl = saved.url;
     ctx.resumeTime = saved.time;
+  }
+  // Settings > Play Crunchyroll in: your browser. For when Crunchyroll will not play video in this
+  // window (its copy protection needs the app to carry a Widevine signature).
+  if (settings.get('playIn') === 'browser') {
+    shell.openExternal(url);
+    return { ok: true, external: true, drm: true };
   }
   if (playerView) closePlayer();
   const ses = session.fromPartition('persist:crunchyroll');
@@ -438,6 +444,7 @@ function registerIpc() {
     if (typeof patch.clientId === 'string') allowed.clientId = patch.clientId.trim();
     if (typeof patch.notify === 'boolean') allowed.notify = patch.notify;
     if ([0.8, 0.9, 0.95].includes(Number(patch.autoMarkPct))) allowed.autoMarkPct = Number(patch.autoMarkPct);
+    if (['app', 'browser'].includes(patch.playIn)) allowed.playIn = patch.playIn;
     if (typeof patch.welcomed === 'boolean') allowed.welcomed = patch.welcomed;
     settings.patch(allowed);
     if (allowed.userName !== undefined && allowed.userName !== before) {
@@ -532,7 +539,7 @@ app.whenReady().then(async () => {
     }
   }
   const dir = app.getPath('userData');
-  settings = new Store(dir, 'settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false, notify: true, autoMarkPct: 0.9 });
+  settings = new Store(dir, 'settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false, notify: true, autoMarkPct: 0.9, playIn: 'app' });
   tracking = new Store(dir, 'tracking', { accounts: {}, notified: {} });
   cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
   core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(path.join(dir, 'dubs.json')), getToken, clearToken });

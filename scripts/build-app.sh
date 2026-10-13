@@ -40,8 +40,16 @@ if [ -f build/icon.png ] && command -v iconutil >/dev/null 2>&1; then
   setkey CFBundleIconFile AniTrack
 fi
 
-# Changing the bundle breaks its original signature; an ad-hoc signature lets macOS run it.
 xattr -cr "$OUT" 2>/dev/null || true
+
+# Widevine (VMP) signature, which Crunchyroll's copy protection needs before it plays video in the app.
+# Uses castlabs' free EVS service: VMP_SIGN=1 after logging in with `python3 -m castlabs_evs.account reauth`.
+# It has to come before the Apple signature below.
+if [ -n "${VMP_SIGN:-}" ]; then
+  python3 -m castlabs_evs.vmp sign-pkg "$OUT"
+fi
+
+# Changing the bundle breaks its original signature; an ad-hoc signature lets macOS run it.
 codesign --force --deep --sign - "$OUT"
 
 # NO_INSTALL=1 (used by the GitHub build) stops here and leaves the app in dist/.
