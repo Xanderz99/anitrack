@@ -45,7 +45,9 @@ xattr -cr "$OUT" 2>/dev/null || true
 # Widevine (VMP) signature, which Crunchyroll's copy protection needs before it plays video in the app.
 # Uses castlabs' free EVS service: VMP_SIGN=1 after logging in with `python3 -m castlabs_evs.account reauth`.
 # It has to come before the Apple signature below.
+# The marker tells the app it may play Crunchyroll in its own window; without it, Watch opens the browser.
 if [ -n "${VMP_SIGN:-}" ]; then
+  touch "$OUT/Contents/Resources/vmp-signed"
   python3 -m castlabs_evs.vmp -n sign-pkg "$OUT"
 fi
 

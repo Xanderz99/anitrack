@@ -5,13 +5,15 @@ A Mac app and iPhone web app for keeping up with new anime, synced through your 
 - **For You**: this season's shows ranked by how well they match what you rate highly on AniList. Scores are read against your own average (an 8 from someone who rates everything 9 counts as a miss), and studios you rate well count too.
 - **English dub** and **Crunchyroll** filters, plus a sequel check (hides sequels whose earlier season isn't on your list).
 - **My Shows** and **Airing Soon**: episode countdowns in your local time, with a notification when an episode airs.
-- **Watch** plays Crunchyroll inside the app window (no separate browser). It remembers where you stopped, so the button turns into **Resume** (episode and time). When you pass 90% of an episode, the next episode is counted and sent to your AniList list.
+- **Watch** opens the episode on Crunchyroll in your browser (or inside the app, in a Widevine-signed build, where it remembers where you stopped and marks the episode at 90%). The browser extension marks episodes on crunchyroll.com.
 
 ## Download for Mac
 
 Get the latest **AniTrack for Mac** from the [mac-latest release](https://github.com/Xanderz99/anitrack/releases/tag/mac-latest): `AniTrack-mac-apple-silicon.zip` for M1 and later, `AniTrack-mac-intel.zip` for older Macs. Unzip it and drag AniTrack to Applications. The first time, macOS says it cannot check the app (it is not from the App Store): open System Settings > Privacy & Security and click **Open Anyway**.
 
-If Crunchyroll says a video is "not available" inside the app, its copy protection (Widevine) is refusing an app without a Widevine signature. Either choose **Settings > Play Crunchyroll in > Your web browser**, or add the signature (free, about five minutes, once):
+**Watch opens Crunchyroll in your web browser.** Crunchyroll's copy protection (Widevine) only plays video inside apps that carry a Widevine signature, and the standard download does not have one. When you come back to AniTrack it asks whether you finished the episode. With the [browser extension](#browser-extension-for-crunchyrollcom), episodes are marked by themselves.
+
+To watch inside the app instead, add the signature to the build (free, about five minutes, once). Signed downloads play in the app automatically:
 
 1. In Terminal on your Mac (a private Python environment avoids macOS refusing the install):
    `python3 -m venv ~/evs && ~/evs/bin/pip install castlabs-evs && ~/evs/bin/python -m castlabs_evs.account signup`
@@ -48,9 +50,9 @@ If that download fails, run `npm i -D electron` instead. Everything works except
     npm run app
 
 This builds `AniTrack.app` (with an icon), puts it in `~/Applications`, and opens it. Drag it to the Dock.
-It is signed ad hoc, so it runs on your own Mac without a developer account. If video does not play in the
-.app but does with `npm start`, the Widevine check is rejecting the ad-hoc signature. Keep using `npm start`,
-or sign the app with castlabs' free EVS service (search "castlabs EVS").
+It is signed ad hoc, so it runs on your own Mac without a developer account. Unless it is built with
+`VMP_SIGN=1` (castlabs' free EVS signing, see above), Watch opens Crunchyroll in your browser. To try the
+in-app player anyway, start it with `ANITRACK_PLAYER=app npm start`.
 
 ## Accounts
 

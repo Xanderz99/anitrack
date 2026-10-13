@@ -794,18 +794,17 @@
       ${accountSection(d)}
       <section class="section">
         <h2>Watching</h2>
+        ${d.inAppPlayer === false ? `
+        <div class="field"><label>Crunchyroll</label><div>Watch opens Crunchyroll in your web browser. Crunchyroll only plays video inside apps that carry a Widevine signature, which this download does not have.</div>
+          <span class="hint">When you come back to AniTrack, it asks whether you finished the episode. To have episodes marked by themselves, add the browser extension.</span></div>
+        <div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/extension-latest">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Chrome, Edge, Brave or Firefox: marks each episode on AniList near its end.</span></div>` : `
         <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
           .map((v) => `<option value="${v}" ${Number(st.autoMarkPct) === v ? 'selected' : ''}>${Math.round(v * 100)}% of the episode</option>`)
           .join('')}</select><span class="hint">Applies when you watch in the Crunchyroll window. The next episode is counted and sent to AniList.</span></div>
         <div class="field"><label for="playIn">Play Crunchyroll in</label><select id="playIn">${[['app', 'AniTrack window'], ['browser', 'Your web browser']]
           .map(([v, l]) => `<option value="${v}" ${(st.playIn || 'app') === v ? 'selected' : ''}>${l}</option>`)
-          .join('')}</select><span class="hint">If Crunchyroll says a video is not available in AniTrack, choose your browser. In the browser, AniTrack asks whether you finished the episode when you come back, instead of marking it by itself.</span></div>
+          .join('')}</select><span class="hint">If Crunchyroll says a video is not available in AniTrack, choose your browser. In the browser, AniTrack asks whether you finished the episode when you come back, instead of marking it by itself.</span></div>`}
         <div class="field"><label for="notify">Notifications</label><label><input type="checkbox" id="notify" ${st.notify ? 'checked' : ''}> Tell me when an episode of a Watching or Planning show airs</label></div>
-        <div class="field"><label>Crunchyroll playback</label><div>${
-          d.drm
-            ? 'Widevine build detected. Sign in to Crunchyroll once in the watch window and it stays signed in.'
-            : 'This copy of Electron has no Widevine, so video will not play in the app. Watch opens Crunchyroll but you will need the Widevine build (see README).'
-        }</div></div>
       </section>
       <section class="section">
         <h2>More</h2>
@@ -1297,7 +1296,13 @@
         store.set('pending', S.pending);
       }
       if (!r.ok) toast(r.error);
-      else if (!r.drm) toast('No Widevine in this Electron build, so video may not play. See the README.');
+      else if (r.external && !WEB && S.data?.inAppPlayer === false && !store.get('extHint', false)) {
+        store.set('extHint', true);
+        toast('Opened in your browser. The AniTrack browser extension can mark episodes there by itself.', {
+          label: 'Get it',
+          fn: () => window.api.openExternal('https://github.com/Xanderz99/anitrack/releases/tag/extension-latest'),
+        });
+      } else if (!r.drm) toast('No Widevine in this Electron build, so video may not play. See the README.');
     } else if ((act === 'inc' || act === 'dec') && s) {
       applyTrack(id, { progress: Math.max(0, s.me.progress + (act === 'inc' ? 1 : -1)) });
     }

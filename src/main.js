@@ -55,6 +55,12 @@ function resumeFor(id) {
 
 const baseUrl = (u) => String(u || '').split(/[?#]/)[0];
 
+// Crunchyroll only plays video inside an app that carries a Widevine (VMP) signature. The build script
+// leaves a marker in signed downloads; anything else opens Crunchyroll in your web browser, where it
+// plays (and the AniTrack browser extension marks episodes). ANITRACK_PLAYER=app forces the window.
+const inAppPlayer = () => process.env.ANITRACK_PLAYER === 'app' || fs.existsSync(path.join(process.resourcesPath || '', 'vmp-signed'));
+const playsInBrowser = () => !inAppPlayer() || settings.get('playIn') === 'browser';
+
 function payload() {
   return {
     ...core.basePayload({ resumeFor }),
@@ -62,6 +68,7 @@ function payload() {
     auth: { loggedIn: !!getToken(), name: settings.get('viewerName') || '', avatar: settings.get('viewerAvatar') || '', canLogin: /^\d+$/.test(clientId()), builtInClient: !!config.anilistClientId },
     firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
     drm: !!components,
+    inAppPlayer: inAppPlayer(),
   };
 }
 
@@ -210,7 +217,7 @@ async function openPlayer(id) {
   }
   // Settings > Play Crunchyroll in: your browser. For when Crunchyroll will not play video in this
   // window (its copy protection needs the app to carry a Widevine signature).
-  if (settings.get('playIn') === 'browser') {
+  if (playsInBrowser()) {
     shell.openExternal(url);
     return { ok: true, external: true, drm: true };
   }
