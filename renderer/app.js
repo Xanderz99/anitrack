@@ -390,7 +390,7 @@
     if (['foryou', 'season', 'airing'].includes(S.view) && S.data) ctl += genreSelect();
     if (S.view === 'season') ctl += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
     if (S.view === 'airing' || S.view === 'mine') ctl += '<button class="btn small" data-act="exportCal" title="Save upcoming episodes as a calendar file">Export calendar</button>';
-    if (S.view === 'list' && S.data) {
+    if (S.view === 'list' && S.data?.account && S.data.list.length) {
       const counts = {};
       for (const e of S.data.list) counts[listStatus(e)] = (counts[listStatus(e)] || 0) + 1;
       ctl += LIST_TABS.map(

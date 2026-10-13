@@ -14,7 +14,10 @@ html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adj
 @media (max-width: 760px) {
   /* The page itself scrolls (not a box inside it): the header scrolls away, and tapping the status bar
      jumps back to the top like any iPhone app. */
-  .app { display: block; height: auto; }
+  /* Every page at least a full screen tall: iOS places the fixed tab bar differently on pages shorter than
+     the screen, so it jumped between an empty view and a full one. */
+  html, body { height: auto; min-height: 100%; }
+  .app { display: block; height: auto; min-height: 100vh; min-height: 100lvh; }
   .main { display: block; }
   .scroll { overflow: visible; padding: 0 16px calc(96px + var(--sb)); }
   .side { display: none; }

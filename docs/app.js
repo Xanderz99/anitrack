@@ -1126,6 +1126,10 @@ window.__require = require;
   const settings = new Store('settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false });
   const tracking = new Store('tracking', { accounts: {}, notified: {} });
   const cache = new Store('cache', { seasons: {}, user: null, extra: null });
+  // Ask the browser not to clear this site's storage when the phone runs low on space or the app goes
+  // unused for a while (Safari otherwise may), which would log you out and lose local tracking.
+  const keepStorage = () => navigator.storage?.persist?.().catch(() => {});
+  if (settings.get('token') || settings.get('userName')) keepStorage();
   function freeCache() {
     cache.data = JSON.parse(cache.defaults);
     try {
@@ -1206,6 +1210,7 @@ window.__require = require;
       const viewer = await AL.fetchViewer(token);
       settings.patch({ token });
       core.setViewer(viewer);
+      keepStorage();
       return `Logged in as ${viewer.name}`;
     } catch (e) {
       return `AniList rejected the login: ${e.message}`;
@@ -1773,7 +1778,7 @@ window.__require = require;
     if (['foryou', 'season', 'airing'].includes(S.view) && S.data) ctl += genreSelect();
     if (S.view === 'season') ctl += `<select id="sort" aria-label="Sort by">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${S.sort === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
     if (S.view === 'airing' || S.view === 'mine') ctl += '<button class="btn small" data-act="exportCal" title="Save upcoming episodes as a calendar file">Export calendar</button>';
-    if (S.view === 'list' && S.data) {
+    if (S.view === 'list' && S.data?.account && S.data.list.length) {
       const counts = {};
       for (const e of S.data.list) counts[listStatus(e)] = (counts[listStatus(e)] || 0) + 1;
       ctl += LIST_TABS.map(

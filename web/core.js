@@ -55,6 +55,10 @@
   const settings = new Store('settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false });
   const tracking = new Store('tracking', { accounts: {}, notified: {} });
   const cache = new Store('cache', { seasons: {}, user: null, extra: null });
+  // Ask the browser not to clear this site's storage when the phone runs low on space or the app goes
+  // unused for a while (Safari otherwise may), which would log you out and lose local tracking.
+  const keepStorage = () => navigator.storage?.persist?.().catch(() => {});
+  if (settings.get('token') || settings.get('userName')) keepStorage();
   function freeCache() {
     cache.data = JSON.parse(cache.defaults);
     try {
@@ -135,6 +139,7 @@
       const viewer = await AL.fetchViewer(token);
       settings.patch({ token });
       core.setViewer(viewer);
+      keepStorage();
       return `Logged in as ${viewer.name}`;
     } catch (e) {
       return `AniList rejected the login: ${e.message}`;
