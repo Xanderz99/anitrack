@@ -62,7 +62,48 @@ const baseUrl = (u) => String(u || '').split(/[?#]/)[0];
 // leaves a marker in signed downloads; anything else opens Crunchyroll in your web browser, where it
 // plays (and the AniTrack browser extension marks episodes). ANITRACK_PLAYER=app forces the window.
 const inAppPlayer = () => process.env.ANITRACK_PLAYER === 'app' || fs.existsSync(path.join(process.resourcesPath || '', 'vmp-signed'));
-const playsInBrowser = () => !inAppPlayer() || settings.get('playIn') === 'browser';
+// Chromium browsers can open a page as an app window (--app): its own window without tabs, where
+// Crunchyroll plays (the browser has Widevine) and your extensions, AniTrack's included, run.
+// (Firefox and Safari have no app windows, so with them Watch opens a normal tab.)
+const APP_BROWSERS = ['Brave Browser', 'Google Chrome', 'Microsoft Edge', 'Vivaldi', 'Opera', 'Opera GX', 'Chromium', 'Google Chrome Beta', 'Brave Browser Beta'];
+let appBrowsersCache = null;
+// Every such browser installed on this Mac: [{ id: 'Brave Browser', name: 'Brave', path }].
+function appWindowBrowsers() {
+  if (appBrowsersCache) return appBrowsersCache;
+  appBrowsersCache = [];
+  const testDirs = process.env.ANITRACK_BROWSER_DIRS; // tests: a stand-in Applications folder
+  if (process.platform !== 'darwin' && !testDirs) return appBrowsersCache;
+  const dirs = testDirs ? testDirs.split(':') : ['/Applications', path.join(app.getPath('home'), 'Applications')];
+  for (const id of APP_BROWSERS) {
+    const found = dirs.map((d) => path.join(d, `${id}.app`)).find((p) => fs.existsSync(p));
+    if (found) appBrowsersCache.push({ id, name: id.replace(/^Google |^Microsoft /, '').replace(/^Brave Browser/, 'Brave'), path: found });
+  }
+  return appBrowsersCache;
+}
+// The one Watch uses: the one picked in Settings, else your default browser if it is one of them,
+// else the first found.
+function appWindowBrowser() {
+  const all = appWindowBrowsers();
+  const picked = all.find((b) => b.id === settings.get('appBrowser'));
+  if (picked) return picked;
+  let def = '';
+  try {
+    def = app.getApplicationNameForProtocol('https://') || '';
+  } catch {
+    /* unknown */
+  }
+  return all.find((b) => def && (def === b.id || def === `${b.id}.app`)) || all[0] || null;
+}
+// How Watch opens Crunchyroll: 'app' (AniTrack's own window, Widevine-signed builds only),
+// 'appwindow' (a Brave/Chrome/Edge app window) or 'browser' (your default browser).
+function playMode() {
+  const choice = settings.get('playIn');
+  const browser = appWindowBrowser();
+  if (choice === 'browser') return 'browser';
+  if (choice === 'appwindow' && browser) return 'appwindow';
+  if (choice === 'app' && inAppPlayer()) return 'app';
+  return browser ? 'appwindow' : inAppPlayer() ? 'app' : 'browser';
+}
 
 function payload() {
   return {
@@ -72,6 +113,9 @@ function payload() {
     firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
     drm: !!components,
     inAppPlayer: inAppPlayer(),
+    playMode: playMode(),
+    appBrowsers: appWindowBrowsers().map((b) => ({ id: b.id, name: b.name })),
+    appBrowser: appWindowBrowser()?.id || null,
     crSync: crSyncPayload(),
     update: updater ? updater.state() : { status: 'unavailable', sha: buildSha() },
   };
@@ -222,7 +266,14 @@ async function openPlayer(id) {
   }
   // Settings > Play Crunchyroll in: your browser. For when Crunchyroll will not play video in this
   // window (its copy protection needs the app to carry a Widevine signature).
-  if (playsInBrowser()) {
+  const mode = playMode();
+  if (mode === 'appwindow') {
+    // -n hands the --app request to the browser even when it is already open.
+    const b = appWindowBrowser();
+    execFile('open', ['-na', b.path, '--args', `--app=${url}`], (e) => e && shell.openExternal(url));
+    return { ok: true, external: true, drm: true, via: b.name };
+  }
+  if (mode === 'browser') {
     shell.openExternal(url);
     return { ok: true, external: true, drm: true };
   }
@@ -456,7 +507,8 @@ function registerIpc() {
     if (typeof patch.clientId === 'string') allowed.clientId = patch.clientId.trim();
     if (typeof patch.notify === 'boolean') allowed.notify = patch.notify;
     if ([0.8, 0.9, 0.95].includes(Number(patch.autoMarkPct))) allowed.autoMarkPct = Number(patch.autoMarkPct);
-    if (['app', 'browser'].includes(patch.playIn)) allowed.playIn = patch.playIn;
+    if (['app', 'browser', 'appwindow'].includes(patch.playIn)) allowed.playIn = patch.playIn;
+    if (appWindowBrowsers().some((b) => b.id === patch.appBrowser)) allowed.appBrowser = patch.appBrowser;
     if (typeof patch.welcomed === 'boolean') allowed.welcomed = patch.welcomed;
     if (typeof patch.crSyncOn === 'boolean') allowed.crSyncOn = patch.crSyncOn;
     settings.patch(allowed);
@@ -700,6 +752,9 @@ app.whenReady().then(async () => {
   }
   const dir = app.getPath('userData');
   settings = new Store(dir, 'settings', { userName: '', clientId: '', token: '', viewerId: null, viewerName: '', viewerAvatar: '', welcomed: false, notify: true, autoMarkPct: 0.9, playIn: 'app' });
+  // "Your web browser" was the workaround while the app window could not play; once, let the
+  // automatic choice (a Brave/Chrome app window when there is one) take over.
+  if (!settings.get('playInV2')) settings.patch({ playInV2: true, ...(settings.get('playIn') === 'browser' ? { playIn: 'app' } : {}) });
   tracking = new Store(dir, 'tracking', { accounts: {}, notified: {} });
   cache = new Store(dir, 'cache', { seasons: {}, user: null, extra: null });
   core = createCore({ AL, settings, tracking, cache, dubMatch: makeDubMatcher(path.join(dir, 'dubs.json')), getToken, clearToken });

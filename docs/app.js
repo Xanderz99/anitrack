@@ -2134,6 +2134,34 @@ window.__require = require;
       </section>`;
   }
 
+  // Mac: where Watch opens Crunchyroll. A browser app window (Brave, Chrome, Edge…) plays video and runs
+  // the AniTrack extension; AniTrack's own window plays only in Widevine-signed builds.
+  const EXT_PAGE = 'https://github.com/Xanderz99/anitrack/releases/tag/extension-latest';
+  function playField(d, st) {
+    const opts = [
+      ...(d.appBrowsers || []).map((b) => [`appwindow:${b.id}`, `${b.name} app window`]),
+      ...(d.inAppPlayer ? [['app', 'AniTrack window']] : []),
+      ['browser', 'A tab in your default browser'],
+    ];
+    const cur = d.playMode === 'appwindow' ? `appwindow:${d.appBrowser}` : d.playMode;
+    const appWin = d.playMode === 'appwindow';
+    const hint = appWin
+      ? `Opens Crunchyroll in its own ${esc((d.appBrowsers || []).find((b) => b.id === d.appBrowser)?.name || '')} window, where video plays. Add the AniTrack extension to that browser and episodes are marked by themselves.`
+      : d.playMode === 'app'
+        ? 'Plays inside AniTrack and marks the episode when you pass the point set below.'
+        : `When you come back to AniTrack it asks whether you finished the episode.${(d.appBrowsers || []).length ? '' : ' Brave, Chrome, Edge, Vivaldi or Opera can open Crunchyroll in its own window instead, with the extension marking episodes.'}`;
+    return `<div class="field"><label for="playIn">Play Crunchyroll in</label><select id="playIn">${opts
+      .map(([v, l]) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`)
+      .join('')}</select><span class="hint">${hint}</span></div>
+      ${
+        d.playMode === 'app'
+          ? `<div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
+              .map((v) => `<option value="${v}" ${Number(st.autoMarkPct) === v ? 'selected' : ''}>${Math.round(v * 100)}% of the episode</option>`)
+              .join('')}</select></div>`
+          : `<div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="${EXT_PAGE}">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Brave, Chrome, Edge, Vivaldi, Opera or Firefox: marks each episode on AniList near its end.</span></div>`
+      }`;
+  }
+
   // Mac: the version, and updates from the GitHub release (src/updater.js).
   const RELEASE_PAGE = 'https://github.com/Xanderz99/anitrack/releases/tag/mac-latest';
   function updateField(d) {
@@ -2242,16 +2270,7 @@ window.__require = require;
       ${accountSection(d)}
       <section class="section">
         <h2>Watching</h2>
-        ${d.inAppPlayer === false ? `
-        <div class="field"><label>Crunchyroll</label><div>Watch opens Crunchyroll in your web browser. Crunchyroll only plays video inside apps that carry a Widevine signature, which this download does not have.</div>
-          <span class="hint">When you come back to AniTrack, it asks whether you finished the episode. To have episodes marked by themselves, add the browser extension.</span></div>
-        <div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/extension-latest">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Chrome, Edge, Brave or Firefox: marks each episode on AniList near its end.</span></div>` : `
-        <div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
-          .map((v) => `<option value="${v}" ${Number(st.autoMarkPct) === v ? 'selected' : ''}>${Math.round(v * 100)}% of the episode</option>`)
-          .join('')}</select><span class="hint">Applies when you watch in the Crunchyroll window. The next episode is counted and sent to AniList.</span></div>
-        <div class="field"><label for="playIn">Play Crunchyroll in</label><select id="playIn">${[['app', 'AniTrack window'], ['browser', 'Your web browser']]
-          .map(([v, l]) => `<option value="${v}" ${(st.playIn || 'app') === v ? 'selected' : ''}>${l}</option>`)
-          .join('')}</select><span class="hint">If Crunchyroll says a video is not available in AniTrack, choose your browser. In the browser, AniTrack asks whether you finished the episode when you come back, instead of marking it by itself.</span></div>`}
+        ${playField(d, st)}
         <div class="field"><label for="notify">Notifications</label><label><input type="checkbox" id="notify" ${st.notify ? 'checked' : ''}> Tell me when an episode of a Watching or Planning show airs</label></div>
       </section>
       ${crSyncSection(d)}
@@ -2789,13 +2808,13 @@ window.__require = require;
       if (document.querySelector('.sheet-back')) closeSheet();
       const r = await window.api.watch(id);
       if (r.ok && r.external && s) {
-        S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
+        S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now(), via: r.via || null };
         store.set('pending', S.pending);
       }
       if (!r.ok) toast(r.error);
-      else if (r.external && !WEB && S.data?.inAppPlayer === false && !store.get('extHint', false)) {
+      else if (r.external && !WEB && !store.get('extHint', false)) {
         store.set('extHint', true);
-        toast('Opened in your browser. The AniTrack browser extension can mark episodes there by itself.', {
+        toast(`Opened in ${r.via ? `a ${r.via} window` : 'your browser'}. Add the AniTrack extension${r.via ? ` to ${r.via}` : ''} and it marks episodes there by itself.`, {
           label: 'Get it',
           fn: () => window.api.openExternal('https://github.com/Xanderz99/anitrack/releases/tag/extension-latest'),
         });
@@ -2842,7 +2861,11 @@ window.__require = require;
     else if (t.id === 'clientId') patch.clientId = t.value;
     else if (t.id === 'notify') patch.notify = t.checked;
     else if (t.id === 'autoMark') patch.autoMarkPct = Number(t.value);
-    else if (t.id === 'playIn') patch.playIn = t.value;
+    else if (t.id === 'playIn') {
+      const [mode, browser] = t.value.split(':');
+      patch.playIn = mode;
+      if (browser) patch.appBrowser = browser;
+    }
     else if (t.id === 'crSyncOn') patch.crSyncOn = t.checked;
     else return;
     S.data = await window.api.saveSettings(patch);
@@ -2902,7 +2925,7 @@ window.__require = require;
 
   // iPhone: you watched in the Crunchyroll app, so ask about it when you come back.
   S.pending = store.get('pending', null);
-  function askPending() {
+  async function askPending() {
     const p = S.pending;
     if (!p || !S.data) return;
     const away = Date.now() - p.t;
@@ -2910,6 +2933,15 @@ window.__require = require;
     S.pending = null;
     store.set('pending', null);
     if (away > 12 * 3600e3) return;
+    // Watched in a browser window where the extension may already have marked it: ask AniList first.
+    if (p.via) {
+      try {
+        S.data = await window.api.refresh({ force: true });
+        render();
+      } catch {
+        /* offline: ask anyway */
+      }
+    }
     const cur = byId(p.id) || listById(p.id);
     if (cur && cur.me.progress >= p.ep) return; // already counted
     toast(`Finished ${p.title} episode ${p.ep}?`, { label: 'Mark watched', fn: () => applyTrack(p.id, { progress: p.ep }) });
