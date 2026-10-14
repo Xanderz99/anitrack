@@ -237,6 +237,19 @@ function closePlayer() {
   send('data', payload()); // refreshes the Resume label
 }
 
+// A streaming page (Crunchyroll, Netflix, HIDIVE…) in a browser app window when there is one and you
+// have not chosen a normal tab; otherwise in your default browser.
+function openWatchPage(url) {
+  const b = settings.get('playIn') !== 'browser' ? appWindowBrowser() : null;
+  if (b) {
+    // -n hands the --app request to the browser even when it is already open.
+    execFile('open', ['-na', b.path, '--args', `--app=${url}`], (e) => e && shell.openExternal(url));
+    return { ok: true, external: true, drm: true, via: b.name };
+  }
+  shell.openExternal(url);
+  return { ok: true, external: true, drm: true };
+}
+
 async function openPlayer(id) {
   if (!mainWin || mainWin.isDestroyed()) return { ok: false, error: 'The main window is not open.' };
   let raw = core.findRaw(id);
@@ -252,10 +265,7 @@ async function openPlayer(id) {
   }
   const show = core.enrich(raw);
   // Not on Crunchyroll but on another service: that opens in the browser (only Crunchyroll plays in the app).
-  if (!show.crUrl && show.streams[0]) {
-    shell.openExternal(show.streams[0].url);
-    return { ok: true, external: true, drm: true };
-  }
+  if (!show.crUrl && show.streams[0]) return openWatchPage(show.streams[0].url);
   let url = show.crUrl || `https://www.crunchyroll.com/search?q=${encodeURIComponent(show.title)}`;
   const ctx = { showId: id, key: null, marked: false, lastSave: 0, consumed: false, resumeUrl: null, resumeTime: 0 };
   const saved = core.tracking.get('resume')[id];
@@ -266,17 +276,7 @@ async function openPlayer(id) {
   }
   // Settings > Play Crunchyroll in: your browser. For when Crunchyroll will not play video in this
   // window (its copy protection needs the app to carry a Widevine signature).
-  const mode = playMode();
-  if (mode === 'appwindow') {
-    // -n hands the --app request to the browser even when it is already open.
-    const b = appWindowBrowser();
-    execFile('open', ['-na', b.path, '--args', `--app=${url}`], (e) => e && shell.openExternal(url));
-    return { ok: true, external: true, drm: true, via: b.name };
-  }
-  if (mode === 'browser') {
-    shell.openExternal(url);
-    return { ok: true, external: true, drm: true };
-  }
+  if (playMode() !== 'app') return openWatchPage(url);
   if (playerView) closePlayer();
   const ses = session.fromPartition('persist:crunchyroll');
   ses.setUserAgent(cleanUserAgent());
@@ -570,6 +570,13 @@ function registerIpc() {
     app.exit(0);
   });
   ipcMain.handle('watch:open', (_e, id) => openPlayer(Number(id)));
+  // Show page > Watch on <service>: only links AniList lists for that show.
+  ipcMain.handle('watch:service', (_e, id, url) => {
+    const raw = core.findRaw(Number(id));
+    const streams = raw ? core.enrich(raw).streams : [];
+    if (!/^https:\/\//.test(String(url)) || (streams.length && !streams.some((s) => s.url === url))) return { ok: false, error: 'That link is not one of this show’s services.' };
+    return openWatchPage(String(url));
+  });
   ipcMain.handle('player:close', () => closePlayer());
   ipcMain.handle('calendar:export', () => exportCalendar());
   ipcMain.handle('player:external', () => {

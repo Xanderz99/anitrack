@@ -288,6 +288,10 @@
       window.open(url, '_blank', 'noopener');
       return { ok: true, external: true, drm: true };
     },
+    async watchService(_id, url) {
+      if (/^https:\/\//.test(String(url))) window.open(url, '_blank', 'noopener');
+      return { ok: true, external: true, drm: true };
+    },
     async closePlayer() {},
     exportCalendar: async () => exportCalendar(),
     playerExternal() {},

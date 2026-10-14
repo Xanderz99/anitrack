@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   adoptGuest: () => invoke('account:adopt-guest'),
   resetDevice: () => invoke('device:reset'),
   watch: (id) => invoke('watch:open', id),
+  watchService: (id, url) => invoke('watch:service', id, url),
   closePlayer: () => invoke('player:close'),
   exportCalendar: () => invoke('calendar:export'),
   playerExternal: () => invoke('player:external'),

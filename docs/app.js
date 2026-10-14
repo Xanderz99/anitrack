@@ -1359,6 +1359,10 @@ window.__require = require;
       window.open(url, '_blank', 'noopener');
       return { ok: true, external: true, drm: true };
     },
+    async watchService(_id, url) {
+      if (/^https:\/\//.test(String(url))) window.open(url, '_blank', 'noopener');
+      return { ok: true, external: true, drm: true };
+    },
     async closePlayer() {},
     exportCalendar: async () => exportCalendar(),
     playerExternal() {},
@@ -2801,9 +2805,11 @@ window.__require = require;
     } else if (act === 'details' && id) openDetails(id);
     else if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watchOn' && id) {
-      // Another service: open it, and ask about the episode on return as with Crunchyroll in the browser.
+      // Another service: open it (on the Mac, in the same browser app window as Crunchyroll), and ask
+      // about the episode on return. The extension only marks Crunchyroll, so there is nothing to recheck.
       closeSheet();
-      window.api.openExternal(btn.dataset.url);
+      const r = await window.api.watchService(id, btn.dataset.url);
+      if (!r.ok) return toast(r.error);
       if (s) {
         S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
         store.set('pending', S.pending);
