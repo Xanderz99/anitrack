@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { norm, base, seasonOf, parseEpisode, pickEntry, nextSave, linkKey } = require('../extension/match');
+const { norm, base, seasonOf, parseEpisode, parseNetflix, pickEntry, nextSave, linkKey } = require('../extension/match');
 
 test('titles compare without punctuation, dubs or season markers', () => {
   assert.strictEqual(norm('Frieren: Beyond Journey’s End (English Dub)'), 'frieren beyond journeys end');
@@ -74,4 +74,19 @@ test('the manifest loads only files that exist, and asks for nothing beyond AniL
   for (const f of files) assert.ok(fs.existsSync(path.join(dir, f)), `${f} is missing`);
   assert.deepStrictEqual(m.permissions, ['storage']);
   assert.deepStrictEqual(m.host_permissions, ['https://graphql.anilist.co/*']);
+});
+
+test('Netflix: the player title gives the show, season and episode', () => {
+  const url = '/watch/81234567';
+  assert.deepStrictEqual(parseNetflix({ url, show: 'Kaiju No. 8', parts: ['S2:E3', 'The Man Called Isao'] }), { series: 'Kaiju No. 8', season: 2, episode: 3, source: 'netflix', site: 'netflix' });
+  assert.deepStrictEqual(parseNetflix({ url, show: 'Dandadan', parts: ['E7', 'Title'] }).episode, 7, 'one-season shows say just E7');
+  assert.strictEqual(parseNetflix({ url, show: 'Dandadan', parts: ['Episode 4', 'Title'] }).episode, 4);
+  assert.strictEqual(parseNetflix({ url, show: 'A Film', parts: [] }).partial, true, 'films have no episode');
+  assert.strictEqual(parseNetflix({ url: '/browse', show: 'X', parts: ['E1'] }), null, 'not a watch page');
+  // and it matches the right season on your list like Crunchyroll does
+  const list = [
+    { mediaId: 1, titles: ['Kaiju No. 8'], status: 'COMPLETED', progress: 12, episodes: 12, title: 'Kaiju No. 8' },
+    { mediaId: 2, titles: ['Kaiju No. 8 Season 2', 'Kaijuu 8-gou 2nd Season'], status: 'CURRENT', progress: 2, episodes: 11, title: 'Kaiju No. 8 Season 2' },
+  ];
+  assert.strictEqual(pickEntry(parseNetflix({ url, show: 'Kaiju No. 8', parts: ['S2:E3'] }), list).entry.mediaId, 2);
 });

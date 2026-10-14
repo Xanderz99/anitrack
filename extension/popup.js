@@ -19,7 +19,7 @@ function render() {
   $('#who').textContent = s.viewer ? s.viewer.name : '';
   if (!s.viewer) {
     $('#main').innerHTML = `
-      <p>Connect your AniList account, then watch on <b>crunchyroll.com</b> as usual. Near the end of each episode, AniTrack marks it watched on your AniList list.</p>
+      <p>Connect your AniList account, then watch on <b>crunchyroll.com</b> or <b>netflix.com</b> as usual. Near the end of each episode, AniTrack marks it watched on your AniList list.</p>
       <button class="primary" id="connect">Connect with AniTrack</button>
       <p class="muted">Opens the AniTrack web app. Log in with AniList there (or already be logged in) and the extension connects by itself.</p>
       <h2>Or paste a login code</h2>
@@ -40,8 +40,8 @@ function render() {
   }
 
   const entry = s.pick?.mediaId ? s.entries.find((e) => e.mediaId === s.pick.mediaId) : null;
-  let now = '<p class="muted">Open an episode on crunchyroll.com and it shows up here.</p>';
-  if (s.info?.partial) now = `<div class="card"><p>This looks like a Crunchyroll episode, but AniTrack could not read ${s.info.series ? 'the episode number' : 'the show name'}.</p></div>`;
+  let now = '<p class="muted">Open an episode on crunchyroll.com or netflix.com and it shows up here.</p>';
+  if (s.info?.partial) now = `<div class="card"><p>This looks like an episode, but AniTrack could not read ${s.info.series ? 'the episode number' : 'the show name'}.</p></div>`;
   else if (s.info) {
     const options = s.entries
       .slice()
@@ -54,7 +54,7 @@ function render() {
         <span class="muted">${entry ? `On your list as <b>${esc(entry.title)}</b> · ${entry.progress}${entry.episodes ? `/${entry.episodes}` : ''} watched${s.pick.why === 'linked' ? ' (linked by you)' : ''}` : `Not matched: ${esc(s.pick?.why || 'unknown')}`}</span>
         <label class="muted" for="pickShow">Show on your AniList list</label>
         <select id="pickShow"><option value="">${entry ? 'Automatic' : 'Choose…'}</option>${options}</select>
-        <div class="row"><label class="muted" for="offset">Crunchyroll numbers this season from episode</label><input type="number" id="offset" min="1" value="${(s.linked?.offset || 0) + 1}"></div>
+        <div class="row"><label class="muted" for="offset">${s.info.site === 'netflix' ? 'Netflix' : 'Crunchyroll'} numbers this season from episode</label><input type="number" id="offset" min="1" value="${(s.linked?.offset || 0) + 1}"></div>
         <div class="row"><button class="primary" id="mark" ${entry || s.linked ? '' : 'disabled'}>Mark episode ${esc(s.info.episode - (s.pick?.offset || 0))} watched</button></div>
       </div>`;
   }

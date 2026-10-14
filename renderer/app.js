@@ -770,7 +770,7 @@
           ? `<div class="field"><label for="autoMark">Mark episode watched at</label><select id="autoMark">${[0.8, 0.9, 0.95]
               .map((v) => `<option value="${v}" ${Number(st.autoMarkPct) === v ? 'selected' : ''}>${Math.round(v * 100)}% of the episode</option>`)
               .join('')}</select></div>`
-          : `<div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="${EXT_PAGE}">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Brave, Chrome, Edge, Vivaldi, Opera or Firefox: marks each episode on AniList near its end.</span></div>`
+          : `<div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="${EXT_PAGE}">Get the AniTrack extension ↗</button></div><span class="hint">For Brave, Chrome, Edge, Vivaldi, Opera or Firefox: marks each Crunchyroll and Netflix episode on AniList near its end.</span></div>`
       }`;
   }
 
@@ -868,7 +868,7 @@
         <h2>On a computer</h2>
         <p class="note">AniTrack for Mac plays Crunchyroll in its own window, marks episodes as you finish them, and shows a countdown in the menu bar. It syncs with this app through your AniList account.</p>
         <div class="field"><label>Download</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/mac-latest">Get AniTrack for Mac ↗</button></div><span class="hint">Or, in Safari on a Mac, open this page and choose File › Add to Dock.</span></div>
-        <div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/extension-latest">Get AniTrack for Crunchyroll ↗</button></div><span class="hint">For Chrome, Edge, Brave or Firefox on a computer: marks episodes on AniList as you watch them on crunchyroll.com.</span></div>
+        <div class="field"><label>Browser extension</label><div><button class="btn small" data-act="ext" data-url="https://github.com/Xanderz99/anitrack/releases/tag/extension-latest">Get the AniTrack extension ↗</button></div><span class="hint">For Chrome, Edge, Brave or Firefox on a computer: marks episodes on AniList as you watch them on crunchyroll.com or netflix.com.</span></div>
       </section>
       <section class="section">
         <h2>Watching on iPhone</h2>
@@ -1414,12 +1414,12 @@
     else if (act === 'ext') window.api.openExternal(btn.dataset.url);
     else if (act === 'watchOn' && id) {
       // Another service: open it (on the Mac, in the same browser app window as Crunchyroll), and ask
-      // about the episode on return. The extension only marks Crunchyroll, so there is nothing to recheck.
+      // about the episode on return. The extension also marks Netflix, so AniList is checked first there.
       closeSheet();
       const r = await window.api.watchService(id, btn.dataset.url);
       if (!r.ok) return toast(r.error);
       if (s) {
-        S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
+        S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now(), via: /netflix\.com/.test(btn.dataset.url) ? r.via || 'browser' : null };
         store.set('pending', S.pending);
       }
     } else if (act === 'watch' && id) {

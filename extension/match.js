@@ -91,6 +91,26 @@
     return { series: series.replace(/\s+/g, ' ').trim(), season, episode, source };
   }
 
+  // Netflix's player shows the show and episode while its controls are visible:
+  // <div data-uia="video-title"><h4>Show</h4><span>S1:E3</span><span>Episode title</span></div>
+  // (one-season shows say just "E3"). `raw` is { url, show, parts: [span texts] }.
+  function parseNetflix(raw) {
+    if (!/^\/watch\/\d+/.test(raw.url || '')) return null;
+    const series = String(raw.show || '').replace(/\s+/g, ' ').trim();
+    let season = null;
+    let episode = null;
+    for (const p of raw.parts || []) {
+      const m = /^\s*(?:S(?:eason)?\s*(\d+)\s*[:·,]?\s*)?(?:E|Ep\.?|Episode)\s*(\d+)\s*$/i.exec(p);
+      if (m) {
+        season = m[1] ? Number(m[1]) : null;
+        episode = Number(m[2]);
+        break;
+      }
+    }
+    if (!series || episode == null) return series ? { series, season, episode: null, source: null, partial: true, site: 'netflix' } : null;
+    return { series, season: season || seasonOf(series), episode, source: 'netflix', site: 'netflix' };
+  }
+
   // The key a manual link is saved under: one per Crunchyroll series and season.
   const linkKey = (info) => `${norm(info.series)}|${info.season || 1}`;
 
@@ -149,7 +169,7 @@
     return { save: { mediaId: entry.mediaId, progress: ep, status } };
   }
 
-  const api = { norm, base, seasonOf, parseEpisode, linkKey, pickEntry, nextSave };
+  const api = { norm, base, seasonOf, parseEpisode, parseNetflix, linkKey, pickEntry, nextSave };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else globalThis.AniTrackMatch = api;
 })();

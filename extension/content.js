@@ -1,6 +1,6 @@
 'use strict';
-// Runs on crunchyroll.com (and in its player frame). The page itself says which episode it is; the
-// video element says how far through it you are. Both go to the background worker, which decides.
+// Runs on crunchyroll.com (and in its player frame) and netflix.com. The page itself says which episode
+// it is; the video element says how far through it you are. Both go to the background worker, which decides.
 (() => {
   const M = globalThis.AniTrackMatch;
   const send = (msg) => chrome.runtime.sendMessage(msg).catch(() => {}); // the worker may be restarting
@@ -8,7 +8,21 @@
   /* ---------- which episode (top page only) ---------- */
   if (window === window.top) {
     const text = (sel) => document.querySelector(sel)?.textContent?.trim() || '';
+    const netflix = /(^|\.)netflix\.com$/.test(location.hostname);
+    // Netflix shows the title only while its controls are visible, so the last one read is kept for
+    // as long as the same episode (the same /watch/ address) is playing.
+    let netflixSeen = null;
+    const readNetflix = () => {
+      const box = document.querySelector('[data-uia="video-title"]');
+      const info = box
+        ? M.parseNetflix({ url: location.pathname, show: box.querySelector('h4')?.textContent || '', parts: [...box.querySelectorAll('span')].map((s) => s.textContent) })
+        : null;
+      if (info && !info.partial) netflixSeen = { path: location.pathname, info };
+      if (netflixSeen && netflixSeen.path === location.pathname) return netflixSeen.info;
+      return info;
+    };
     const read = () => {
+      if (netflix) return readNetflix();
       const jsonld = [];
       for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
         try {

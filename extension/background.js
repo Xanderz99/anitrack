@@ -133,7 +133,9 @@ async function markTabNow(tabId, manual) {
   }
   await setTab(tabId, { ...st, marked: id });
   if (!pick.entry) {
-    notify(tabId, { text: `Could not tell which show this is (${pick.why}). Pick it in the extension’s menu.` });
+    // Most of Netflix is not anime: a show that is not on your list is left alone without a word.
+    const quiet = info.site === 'netflix' && !manual && pick.why === 'not on your list';
+    if (!quiet) notify(tabId, { text: `Could not tell which show this is (${pick.why}). Pick it in the extension’s menu.` });
     return { ok: false, error: pick.why };
   }
   const ep = info.episode - (pick.offset || 0);

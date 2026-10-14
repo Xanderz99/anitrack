@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "AniTrack for Crunchyroll",
+  "name": "AniTrack for Crunchyroll and Netflix",
   "short_name": "AniTrack",
   "version": "1.0.0",
-  "description": "Marks the Crunchyroll episodes you watch on your AniList list, near the end of each episode.",
+  "description": "Marks the anime episodes you watch on Crunchyroll and Netflix on your AniList list, near the end of each episode.",
   "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
   "action": { "default_title": "AniTrack", "default_popup": "popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
   "background": { "service_worker": "background.js", "scripts": ["match.js", "background.js"] },
@@ -11,7 +11,7 @@
   "host_permissions": ["https://graphql.anilist.co/*"],
   "content_scripts": [
     {
-      "matches": ["https://www.crunchyroll.com/*", "https://static.crunchyroll.com/*"],
+      "matches": ["https://www.crunchyroll.com/*", "https://static.crunchyroll.com/*", "https://www.netflix.com/*"],
       "js": ["match.js", "content.js"],
       "all_frames": true,
       "run_at": "document_idle"
