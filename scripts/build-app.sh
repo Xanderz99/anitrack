@@ -22,6 +22,7 @@ cp -R "$SRC" "$OUT"
 APP="$OUT/Contents/Resources/app"
 mkdir -p "$APP"
 cp -R package.json src renderer "$APP/"
+mkdir -p "$APP/extension" && cp extension/match.js "$APP/extension/" # shared show matcher (Crunchyroll sync)
 
 PLIST="$OUT/Contents/Info.plist"
 setkey() { /usr/libexec/PlistBuddy -c "Set :$1 $2" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST"; }

@@ -742,6 +742,37 @@
       </section>`;
   }
 
+  // Mac: episodes in your Crunchyroll watch history (watched on any device) are marked on AniList.
+  function crSyncSection(d) {
+    const c = d.crSync;
+    if (!c) return '';
+    const when = c.last ? `${dayLabel(c.last / 1000)}, ${timeFmt.format(new Date(c.last))}` : 'not yet';
+    const status = c.error ? `<span class="warn">${esc(c.error)}</span>` : `Last synced ${esc(when)}.`;
+    const marked = c.marked.length
+      ? `<ul class="cr-list">${c.marked.map((m) => `<li>${esc(m.title)} · episode ${m.ep}<span class="hint"> ${esc(dayLabel(m.at / 1000))}</span></li>`).join('')}</ul>`
+      : '';
+    const choices = d.list.filter((e) => ['WATCHING', 'PLANNING', 'PAUSED'].includes(e.me.status)).sort((a, b) => a.title.localeCompare(b.title));
+    const unmatched = c.unmatched.length
+      ? `<div class="field"><label>Not matched</label><div class="cr-unmatched">${c.unmatched
+          .map(
+            (u) => `<div><b>${esc(u.series)}</b>${u.season > 1 ? ` season ${u.season}` : ''} · episode ${u.episode}
+              <select data-crlink="${esc(u.key)}" aria-label="Show on your list for ${esc(u.series)}"><option value="">Choose the show on your list…</option>${choices
+                .map((e) => `<option value="${e.id}">${esc(e.title)}</option>`)
+                .join('')}<option value="ignore">Ignore this show</option></select></div>`
+          )
+          .join('')}</div><span class="hint">Crunchyroll's title did not match a show you are watching or planning. Pick it once and it is remembered for that season.</span></div>`
+      : '';
+    return `<section class="section">
+        <h2>Crunchyroll history</h2>
+        <div class="field"><label for="crSyncOn">Sync</label><label><input type="checkbox" id="crSyncOn" ${c.on ? 'checked' : ''}> Mark episodes I watch on Crunchyroll anywhere (iPhone app, TV, website)</label>
+          <span class="hint">Every 30 minutes AniTrack reads your Crunchyroll watch history and marks new episodes on AniList. It never lowers your progress. It uses Crunchyroll's own (unofficial) website data, so it can stop working if Crunchyroll changes it.</span></div>
+        <div class="field"><label>Status</label><div>${status}
+          <div class="d-row cr-actions"><button class="btn small" data-act="crSyncNow">Sync now</button><button class="btn small" data-act="crSignIn">Sign in to Crunchyroll</button></div>
+          ${marked}</div></div>
+        ${unmatched}
+      </section>`;
+  }
+
   function deviceSection() {
     return `<section class="section">
         <h2>Spoilers</h2>
@@ -806,6 +837,7 @@
           .join('')}</select><span class="hint">If Crunchyroll says a video is not available in AniTrack, choose your browser. In the browser, AniTrack asks whether you finished the episode when you come back, instead of marking it by itself.</span></div>`}
         <div class="field"><label for="notify">Notifications</label><label><input type="checkbox" id="notify" ${st.notify ? 'checked' : ''}> Tell me when an episode of a Watching or Planning show airs</label></div>
       </section>
+      ${crSyncSection(d)}
       <section class="section">
         <h2>More</h2>
         <div class="field"><label>Menu bar</label><div>The next episode countdown for your shows shows in the menu bar. Click it to open AniTrack.</div></div>
@@ -1258,6 +1290,20 @@
       adoptGuest();
       return;
     }
+    if (act === 'crSyncNow') {
+      btn.disabled = true;
+      btn.textContent = 'Syncing…';
+      S.data = await window.api.crSyncNow();
+      const c = S.data.crSync;
+      toast(c.error || (c.marked[0] && Date.now() - c.marked[0].at < 60e3 ? `Marked from Crunchyroll: ${c.marked[0].title} episode ${c.marked[0].ep}` : 'Crunchyroll history checked. Nothing new to mark.'));
+      render();
+      return;
+    }
+    if (act === 'crSignIn') {
+      await window.api.crSignIn();
+      toast('Sign in to Crunchyroll in the new window, then close it. AniTrack syncs straight after.');
+      return;
+    }
     if (act === 'resetDevice') {
       if (!window.confirm('Remove all AniTrack data from this device? You will be logged out. Your AniList account is not affected.')) return;
       await window.api.resetDevice();
@@ -1327,6 +1373,13 @@
       else applyTrack(id, { status: t.value || null });
       return;
     }
+    if (t.dataset.crlink) {
+      t.disabled = true;
+      S.data = await window.api.crLink(t.dataset.crlink, t.value);
+      toast(t.value === 'ignore' ? 'That show will be left alone.' : 'Linked. Its episodes are marked from now on.');
+      render();
+      return;
+    }
     if (t.id === 'hideSpoilers') {
       store.set('hideSpoilers', t.checked);
       toast('Saved');
@@ -1339,6 +1392,7 @@
     else if (t.id === 'notify') patch.notify = t.checked;
     else if (t.id === 'autoMark') patch.autoMarkPct = Number(t.value);
     else if (t.id === 'playIn') patch.playIn = t.value;
+    else if (t.id === 'crSyncOn') patch.crSyncOn = t.checked;
     else return;
     S.data = await window.api.saveSettings(patch);
     toast('Saved');

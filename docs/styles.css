@@ -350,6 +350,13 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .top li .link { text-align: left; color: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top .rank { display: inline-block; width: 1.8em; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* ===== Crunchyroll history sync (Mac settings) ===== */
+.warn { color: #ff9f0a; }
+.cr-list { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.cr-unmatched { display: flex; flex-direction: column; gap: 8px; }
+.cr-unmatched select { display: block; margin-top: 4px; max-width: 100%; }
+.cr-actions { margin-top: 8px; }
+
 /* ===== Web / iPhone build ===== */
 /* Safe areas as variables, so they can be tested outside an iPhone. */
 :root { --st: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }

@@ -9,7 +9,8 @@ const { components } = electron;
 const { Store } = require('./store');
 const { powerSaveBlocker } = electron;
 const AL = require('./anilist');
-const { createCore, buildIcs } = require('./core');
+const { createCore, buildIcs, ME2L } = require('./core');
+const { createCrClient, syncOnce } = require('./crsync');
 const config = require('./config');
 const { makeDubMatcher } = require('./dubs');
 
@@ -69,6 +70,7 @@ function payload() {
     firstRun: !getToken() && !String(settings.get('userName') || '').trim() && !settings.get('welcomed'),
     drm: !!components,
     inAppPlayer: inAppPlayer(),
+    crSync: crSyncPayload(),
   };
 }
 
@@ -453,10 +455,29 @@ function registerIpc() {
     if ([0.8, 0.9, 0.95].includes(Number(patch.autoMarkPct))) allowed.autoMarkPct = Number(patch.autoMarkPct);
     if (['app', 'browser'].includes(patch.playIn)) allowed.playIn = patch.playIn;
     if (typeof patch.welcomed === 'boolean') allowed.welcomed = patch.welcomed;
+    if (typeof patch.crSyncOn === 'boolean') allowed.crSyncOn = patch.crSyncOn;
     settings.patch(allowed);
     if (allowed.userName !== undefined && allowed.userName !== before) {
       return refresh({ force: true });
     }
+    return payload();
+  });
+  ipcMain.handle('crsync:now', async () => {
+    await syncCrunchyroll(true).catch(() => {});
+    return payload();
+  });
+  ipcMain.handle('crsync:signin', () => {
+    openCrunchyrollSignIn();
+    return true;
+  });
+  // Which list entry a Crunchyroll season belongs to (or 'ignore'), chosen in Settings.
+  ipcMain.handle('crsync:link', async (_e, key, choice) => {
+    const links = { ...(crState.get().links || {}) };
+    if (choice === 'ignore') links[String(key)] = { ignore: true };
+    else if (Number(choice) > 0) links[String(key)] = { mediaId: Number(choice), offset: 0 };
+    else delete links[String(key)];
+    crState.patch({ links, newest: Math.max(0, (crState.get().newest || 0) - 14 * 86400e3) || undefined }); // look at that season again
+    await syncCrunchyroll(true).catch(() => {});
     return payload();
   });
   ipcMain.handle('anilist:login', async () => {
@@ -537,6 +558,96 @@ function createMainWindow() {
   });
 }
 
+/* ---------- Crunchyroll history sync ---------- */
+// Every 30 minutes, episodes in your Crunchyroll watch history (from any device) are marked on AniList.
+// Uses the Crunchyroll sign-in of AniTrack's Crunchyroll window; see src/crsync.js.
+const crSession = () => session.fromPartition('persist:crunchyroll');
+const crState = {
+  get: () => settings.get('crSync') || {},
+  patch: (o) => settings.set('crSync', { ...(settings.get('crSync') || {}), ...o }),
+};
+let crClient = null;
+let crRunning = null;
+// Whether that window is signed in (the session cookie exists; its value is never read here).
+const crSignedIn = async () => (await crSession().cookies.get({ name: 'etp_rt' }).catch(() => [])).length > 0;
+
+function crSyncPayload() {
+  const st = crState.get();
+  return { on: settings.get('crSyncOn') !== false, last: st.last || null, error: st.error || null, errorKind: st.errorKind || null, marked: st.marked || [], unmatched: st.unmatched || [], links: st.links || {} };
+}
+
+async function syncCrunchyroll(manual) {
+  if (crRunning) return crRunning;
+  crRunning = (async () => {
+    if (!manual && settings.get('crSyncOn') === false) return 0;
+    const fail = (error, errorKind) => {
+      crState.patch({ last: Date.now(), error, errorKind });
+      return 0;
+    };
+    if (!getToken()) return fail('Log in with AniList first.', 'anilist');
+    if (!(await crSignedIn())) return fail('Sign in to Crunchyroll in AniTrack once to start.', 'signed-out');
+    if (!core.S.list.length) await refresh({}).catch(() => {});
+    crClient = crClient || createCrClient({ fetch: (url, init) => crSession().fetch(url, { ...init, credentials: 'include' }), state: crState, base: process.env.ANITRACK_CR_BASE || undefined });
+    // Your list as the matcher wants it, including what you marked in AniTrack since the last AniList load.
+    const entries = core.S.list
+      .map((e) => {
+        const l = core.S.listMap[e.id];
+        const me = core.meFor(e.id);
+        return { mediaId: e.id, title: e.title, titles: [e.title, e.romaji].filter(Boolean), episodes: e.episodes || null, progress: me.progress || 0, status: l?.status === 'REPEATING' ? 'REPEATING' : ME2L[me.status] || l?.status };
+      })
+      .filter((e) => ['CURRENT', 'PLANNING', 'PAUSED', 'REPEATING'].includes(e.status));
+    let result;
+    try {
+      result = await syncOnce({ client: crClient, state: crState, entries, threshold: Number(settings.get('autoMarkPct')) || 0.9 });
+    } catch (e) {
+      if (e.kind === 'signed-out') return fail('Crunchyroll signed AniTrack out. Sign in to Crunchyroll again.', 'signed-out');
+      return fail(e.kind === 'challenge' ? 'Crunchyroll asked for a browser check. Open Sign in to Crunchyroll, let the page load, then Sync now.' : e.message, e.kind || 'http');
+    }
+    const done = [];
+    for (const m of result.marks) {
+      const r = await core.setTrack(m.mediaId, { progress: m.ep });
+      if (r.me.progress >= m.ep) done.push({ id: m.mediaId, title: m.title, ep: m.ep, at: Date.now(), synced: !!r.pushed });
+    }
+    const st = crState.get();
+    crState.patch({
+      last: Date.now(),
+      error: null,
+      errorKind: null,
+      newest: Math.max(st.newest || 0, result.newest || 0) || undefined,
+      marked: [...done.reverse(), ...(st.marked || [])].slice(0, 8),
+      unmatched: result.unmatched,
+    });
+    if (done.length) {
+      updateTray();
+      send('data', payload());
+      if (settings.get('notify') && Notification.isSupported()) {
+        new Notification({ title: 'Marked from Crunchyroll', body: done.map((d) => `${d.title} · episode ${d.ep}`).join('\n'), silent: true }).show();
+      }
+    }
+    return done.length;
+  })().finally(() => {
+    crRunning = null;
+  });
+  return crRunning;
+}
+
+// A plain Crunchyroll window for signing in (and passing a browser check), in the player's session.
+let crLoginWin = null;
+function openCrunchyrollSignIn() {
+  if (crLoginWin && !crLoginWin.isDestroyed()) return crLoginWin.focus();
+  crSession().setUserAgent(cleanUserAgent());
+  crLoginWin = new BrowserWindow({ width: 1000, height: 760, title: 'Sign in to Crunchyroll', webPreferences: { partition: 'persist:crunchyroll', contextIsolation: true, sandbox: true } });
+  crLoginWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https:\/\//.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  crLoginWin.loadURL('https://www.crunchyroll.com/');
+  crLoginWin.on('closed', () => {
+    crLoginWin = null;
+    syncCrunchyroll(true).then(() => send('data', payload())).catch(() => {});
+  });
+}
+
 app.whenReady().then(async () => {
   if (components && components.whenReady) {
     try {
@@ -556,6 +667,8 @@ app.whenReady().then(async () => {
   setInterval(updateTray, 30e3);
   setInterval(checkAirings, 60e3);
   setInterval(() => refresh({}).then((p) => send('data', p)).catch(() => {}), 3600e3);
+  setTimeout(() => syncCrunchyroll(false).catch(() => {}), 45e3);
+  setInterval(() => syncCrunchyroll(false).catch(() => {}), 30 * 60e3);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });

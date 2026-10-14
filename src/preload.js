@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('api', {
   exportCalendar: () => invoke('calendar:export'),
   playerExternal: () => invoke('player:external'),
   openExternal: (url) => invoke('open:external', url),
+  crSyncNow: () => invoke('crsync:now'),
+  crSignIn: () => invoke('crsync:signin'),
+  crLink: (key, choice) => invoke('crsync:link', key, choice),
   on: (channel, cb) => {
     if (!EVENTS.includes(channel)) return () => {};
     const handler = (_event, payload) => cb(payload);

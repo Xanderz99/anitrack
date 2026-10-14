@@ -4,7 +4,7 @@ name: mac-app
 on:
   push:
     branches: [main]
-    paths: ['src/**', 'renderer/**', 'build/**', 'package.json', 'scripts/build-app.sh', '.github/workflows/mac-app.yml']
+    paths: ['src/**', 'renderer/**', 'build/**', 'extension/match.js', 'package.json', 'scripts/build-app.sh', '.github/workflows/mac-app.yml']
   workflow_dispatch:
 
 permissions:

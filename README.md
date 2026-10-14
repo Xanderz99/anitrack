@@ -23,6 +23,15 @@ To watch inside the app instead, add the signature to the build (free, about fiv
 
 GitHub rebuilds it automatically whenever the app's code changes (`.github/workflows/mac-app.yml`). For an app that always matches the website instead, open the web app in Safari on a Mac and choose File > Add to Dock.
 
+## Crunchyroll history sync (Mac app)
+
+Episodes you watch on Crunchyroll anywhere, including the iPhone app or a TV, can reach your AniList list automatically. In the Mac app, open **Settings > Crunchyroll history**, press **Sign in to Crunchyroll**, sign in in that window and close it. From then on, every 30 minutes while the Mac app is running, AniTrack reads your Crunchyroll watch history and marks newly finished episodes (90% or more, the same setting as auto-marking) on your AniList list. **Sync now** checks straight away.
+
+- It matches each Crunchyroll season to a show you are watching, planning or have paused on AniList, choosing the right season. Anything it cannot match is listed under **Not matched**: pick the show once, or choose Ignore.
+- It never lowers your progress and never marks past a show's last episode. The first sync looks back two weeks.
+- It reads the same history list Crunchyroll's own website shows, through that window's sign-in. AniTrack never sees your Crunchyroll password, and nothing is changed on Crunchyroll. This is not an official Crunchyroll API, so it may stop working if Crunchyroll changes its site; the Status line then says what went wrong. The approach follows [tolosa/anime-watch-sync](https://github.com/tolosa/anime-watch-sync); the code is in `src/crsync.js`.
+- It only runs while the Mac app is open (it can stay in the menu bar). Turn it off with the checkbox.
+
 ## Browser extension for crunchyroll.com
 
 Watching on crunchyroll.com in Chrome, Edge, Brave or Firefox? The **AniTrack for Crunchyroll** extension marks each episode watched on your AniList list when you reach 85% of it (adjustable), with an **Undo** button on the page. Get `AniTrack-extension.zip` from the [extension-latest release](https://github.com/Xanderz99/anitrack/releases/tag/extension-latest) and unzip it.
