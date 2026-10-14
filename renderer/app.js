@@ -742,6 +742,31 @@
       </section>`;
   }
 
+  // Mac: the version, and updates from the GitHub release (src/updater.js).
+  const RELEASE_PAGE = 'https://github.com/Xanderz99/anitrack/releases/tag/mac-latest';
+  function updateField(d) {
+    const u = d.update;
+    if (!u) return '';
+    const ver = u.sha ? `Build ${esc(u.sha.slice(0, 7))}` : 'Built on this Mac';
+    const text = {
+      unavailable: u.sha ? '' : 'Updates are not checked for copies built on this Mac.',
+      idle: '',
+      current: 'Up to date.',
+      checking: 'Checking for updates…',
+      downloading: 'Downloading an update…',
+      ready: 'An update is ready. It installs when you quit AniTrack.',
+      installing: 'Installing the update…',
+      manual: `An update is available. ${esc(u.error || '')}`,
+      error: esc(u.error || 'Could not check for updates.'),
+    }[u.status];
+    const btns = [
+      u.status === 'ready' ? '<button class="btn small primary" data-act="installUpdate">Restart now</button>' : '',
+      ['idle', 'current', 'error'].includes(u.status) ? '<button class="btn small" data-act="checkUpdate">Check for updates</button>' : '',
+      ['manual', 'error'].includes(u.status) ? `<button class="btn small" data-act="ext" data-url="${RELEASE_PAGE}">Download page ↗</button>` : '',
+    ].join('');
+    return `<div class="field"><label>Version</label><div>${ver}${text ? ` · ${text}` : ''}${btns ? `<div class="d-row cr-actions">${btns}</div>` : ''}</div></div>`;
+  }
+
   // Mac: episodes in your Crunchyroll watch history (watched on any device) are marked on AniList.
   function crSyncSection(d) {
     const c = d.crSync;
@@ -840,6 +865,7 @@
       ${crSyncSection(d)}
       <section class="section">
         <h2>More</h2>
+        ${updateField(d)}
         <div class="field"><label>Menu bar</label><div>The next episode countdown for your shows shows in the menu bar. Click it to open AniTrack.</div></div>
         <div class="field"><label>Shortcuts</label><div class="keys"><span><kbd>⌘1</kbd>–<kbd>⌘8</kbd> switch view</span><span><kbd>/</kbd> or <kbd>⌘F</kbd> search</span><span><kbd>Esc</kbd> clear search / close player</span></div></div>
       </section>
@@ -1290,6 +1316,19 @@
       adoptGuest();
       return;
     }
+    if (act === 'checkUpdate') {
+      btn.disabled = true;
+      S.data = await window.api.checkUpdate();
+      const u = S.data.update;
+      if (u.status === 'current') toast('AniTrack is up to date.');
+      else if (u.error) toast(u.error);
+      render();
+      return;
+    }
+    if (act === 'installUpdate') {
+      if (!(await window.api.installUpdate())) toast('The update is not ready yet.');
+      return;
+    }
     if (act === 'crSyncNow') {
       btn.disabled = true;
       btn.textContent = 'Syncing…';
@@ -1471,6 +1510,11 @@
   window.api.on('data', (d) => {
     S.data = d;
     render();
+    // Once per update: say it is ready, with a button to restart into it.
+    if (d.update?.status === 'ready' && S.updateToldFor !== d.update.latest) {
+      S.updateToldFor = d.update.latest;
+      toast('An AniTrack update is ready.', { label: 'Restart now', fn: () => window.api.installUpdate() });
+    }
   });
   window.api.on('login', handoffSheet);
   window.api.on('toast', (t) => (typeof t === 'string' ? toast(t) : toast(t.msg, t.action)));

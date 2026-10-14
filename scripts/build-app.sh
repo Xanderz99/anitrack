@@ -23,6 +23,9 @@ APP="$OUT/Contents/Resources/app"
 mkdir -p "$APP"
 cp -R package.json src renderer "$APP/"
 mkdir -p "$APP/extension" && cp extension/match.js "$APP/extension/" # shared show matcher (Crunchyroll sync)
+# GitHub's build records its commit, so the app can tell when the release is newer (src/updater.js).
+# Apps built on your own Mac have none and never replace themselves with the release.
+if [ -n "${GITHUB_SHA:-}" ]; then printf '{"sha":"%s"}\n' "$GITHUB_SHA" > "$APP/build.json"; fi
 
 PLIST="$OUT/Contents/Info.plist"
 setkey() { /usr/libexec/PlistBuddy -c "Set :$1 $2" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST"; }

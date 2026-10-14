@@ -11,6 +11,8 @@ const { powerSaveBlocker } = electron;
 const AL = require('./anilist');
 const { createCore, buildIcs, ME2L } = require('./core');
 const { createCrClient, syncOnce } = require('./crsync');
+const { createUpdater } = require('./updater');
+const { execFile, spawn } = require('child_process');
 const config = require('./config');
 const { makeDubMatcher } = require('./dubs');
 
@@ -71,6 +73,7 @@ function payload() {
     drm: !!components,
     inAppPlayer: inAppPlayer(),
     crSync: crSyncPayload(),
+    update: updater ? updater.state() : { status: 'unavailable', sha: buildSha() },
   };
 }
 
@@ -462,6 +465,15 @@ function registerIpc() {
     }
     return payload();
   });
+  ipcMain.handle('update:check', async () => {
+    if (updater) await updater.check();
+    return payload();
+  });
+  ipcMain.handle('update:install', () => {
+    if (!updater || !updater.install({ relaunch: true })) return false;
+    setTimeout(() => app.quit(), 200);
+    return true;
+  });
   ipcMain.handle('crsync:now', async () => {
     await syncCrunchyroll(true).catch(() => {});
     return payload();
@@ -555,6 +567,36 @@ function createMainWindow() {
     if (playerView) players.delete(playerView.webContents.id);
     playerView = null;
     mainWin = null;
+  });
+}
+
+/* ---------- updates (src/updater.js) ---------- */
+let updater = null;
+// The commit this download was built from (written by scripts/build-app.sh); null when run from source.
+function buildSha() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'build.json'), 'utf8')).sha || null;
+  } catch {
+    return null;
+  }
+}
+function setupUpdater() {
+  if (!app.isPackaged || process.platform !== 'darwin' || !buildSha()) return; // copies run with npm start update with git
+  updater = createUpdater({
+    fetch: (url, init) => electron.net.fetch(url, init),
+    currentSha: buildSha(),
+    arch: process.arch,
+    appPath: path.resolve(process.execPath, '..', '..', '..'), // …/AniTrack.app/Contents/MacOS/Electron
+    workDir: path.join(app.getPath('userData'), 'updates'),
+    run: (cmd, args) => new Promise((resolve, reject) => execFile(cmd, args, (e) => (e ? reject(e) : resolve()))),
+    spawnDetached: (file) => spawn('/bin/sh', [file], { detached: true, stdio: 'ignore' }).unref(),
+    onChange: () => send('data', payload()),
+  });
+  setTimeout(() => updater.check(), 20e3);
+  setInterval(() => updater.check(), 6 * 3600e3);
+  // A downloaded update goes in when you quit (no relaunch); Restart now does it straight away.
+  app.on('before-quit', () => {
+    if (updater.state().status === 'ready') updater.install({ relaunch: false });
   });
 }
 
@@ -667,6 +709,7 @@ app.whenReady().then(async () => {
   setInterval(updateTray, 30e3);
   setInterval(checkAirings, 60e3);
   setInterval(() => refresh({}).then((p) => send('data', p)).catch(() => {}), 3600e3);
+  setupUpdater();
   setTimeout(() => syncCrunchyroll(false).catch(() => {}), 45e3);
   setInterval(() => syncCrunchyroll(false).catch(() => {}), 30 * 60e3);
   app.on('activate', () => {

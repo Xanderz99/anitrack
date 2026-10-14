@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   exportCalendar: () => invoke('calendar:export'),
   playerExternal: () => invoke('player:external'),
   openExternal: (url) => invoke('open:external', url),
+  checkUpdate: () => invoke('update:check'),
+  installUpdate: () => invoke('update:install'),
   crSyncNow: () => invoke('crsync:now'),
   crSignIn: () => invoke('crsync:signin'),
   crLink: (key, choice) => invoke('crsync:link', key, choice),

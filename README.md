@@ -21,6 +21,8 @@ To watch inside the app instead, add the signature to the build (free, about fiv
 2. On GitHub, open the repository's **Settings > Secrets and variables > Actions** and add two secrets: `EVS_ACCOUNT_NAME` (your EVS account name) and `EVS_PASSWD` (its password).
 3. Under **Actions > mac-app**, press **Run workflow**. The new download is signed for Widevine.
 
+**Updates install themselves.** The app checks the release shortly after it opens and every 6 hours. A newer build downloads in the background (checked against the fingerprint GitHub publishes) and goes in when you quit AniTrack, or straight away with **Restart now**. Your list, logins and settings are kept. **Settings > More > Version** shows the build and has **Check for updates**. This needs AniTrack to be in your Applications folder (not opened straight from Downloads); otherwise it links to the download page. Updates that only arrive this way start with the first download that includes the updater.
+
 GitHub rebuilds it automatically whenever the app's code changes (`.github/workflows/mac-app.yml`). For an app that always matches the website instead, open the web app in Safari on a Mac and choose File > Add to Dock.
 
 ## Crunchyroll history sync (Mac app)

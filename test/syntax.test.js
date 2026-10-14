@@ -8,7 +8,7 @@ const path = require('path');
 // A single syntax error stops the whole app from starting on every device, so every file the app
 // loads must parse. (Two broken pushes to main got past the other tests this way.)
 const root = path.join(__dirname, '..');
-const files = ['renderer/app.js', 'renderer/boot.js', 'web/core.js', 'web/sw.js', 'docs/app.js', 'docs/boot.js', 'docs/sw.js', 'src/main.js', 'src/preload.js', 'src/player-preload.js', 'src/crsync.js', 'extension/background.js', 'extension/content.js', 'extension/link.js', 'extension/match.js', 'extension/popup.js'];
+const files = ['renderer/app.js', 'renderer/boot.js', 'web/core.js', 'web/sw.js', 'docs/app.js', 'docs/boot.js', 'docs/sw.js', 'src/main.js', 'src/preload.js', 'src/player-preload.js', 'src/crsync.js', 'src/updater.js', 'extension/background.js', 'extension/content.js', 'extension/link.js', 'extension/match.js', 'extension/popup.js'];
 
 for (const f of files) {
   test(`${f} parses`, () => {
