@@ -10,6 +10,7 @@
 const M = require('../extension/match');
 
 const BASE = 'https://www.crunchyroll.com';
+const API_HOST = 'https://beta-api.crunchyroll.com';
 // The public client id of Crunchyroll's web player (no secret), used when the site's own one has not
 // been seen yet. Overridden by the Authorization header the website sends, when AniTrack sees it.
 const WEB_CLIENT = `Basic ${Buffer.from('noaihdevm_6iyg0a8l0q:').toString('base64')}`;
@@ -71,8 +72,8 @@ function plan(items, entries, links, { threshold = 0.9, since = 0 } = {}) {
 }
 
 /* ---------- talking to Crunchyroll ---------- */
-// `fetch` is the Crunchyroll window's session fetch (cookies included); `state` keeps the client
-// header and device id between runs: { get(), patch(obj) }.
+// `fetch` is the Crunchyroll window's session fetch (cookies included); `state` keeps the device id
+// between runs: { get(), patch(obj) }.
 function createCrClient({ fetch, state, now = Date.now, base = BASE }) {
   let token = null; // { access, accountId, expires }
 
@@ -87,56 +88,74 @@ function createCrClient({ fetch, state, now = Date.now, base = BASE }) {
     return res;
   }
 
+  // Crunchyroll serves the same API on its API host and on the website; the API host first, as in
+  // ruflas/crunchyexporter-cli. A test (or a custom `base`) uses only that one.
+  const hosts = base === BASE ? [API_HOST, BASE] : [base];
+  // Crunchyroll's reply, short, for the Status line: "401 invalid_grant".
+  const why = async (res) => {
+    const b = await res.json().catch(() => null);
+    const code = b?.error || b?.code || b?.message || '';
+    return `${res.status}${code ? ` ${String(code).slice(0, 60)}` : ''}`;
+  };
+
+  async function signInAt(host, deviceId) {
+    // The same request ruflas/crunchyexporter-cli makes: the web player's client and a desktop device.
+    const body = new URLSearchParams({ grant_type: 'etp_rt_cookie', scope: 'offline_access', device_id: deviceId, device_name: 'Chrome on Windows', device_type: 'com.crunchyroll.desktop.windows' });
+    const res = await call(`${host}/auth/v1/token`, {
+      method: 'POST',
+      headers: { Authorization: WEB_CLIENT, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: body.toString(),
+    });
+    if (!res.ok) return { error: await why(res), status: res.status };
+    const data = await res.json().catch(() => null);
+    if (!data?.access_token) return { error: `${res.status} no token in the reply`, status: res.status };
+    let accountId = data.account_id;
+    if (!accountId) {
+      const me = await call(`${host}/accounts/v1/me`, { headers: { Authorization: `Bearer ${data.access_token}`, Accept: 'application/json' } });
+      accountId = me.ok ? (await me.json().catch(() => null))?.account_id : null;
+      if (!accountId) return { error: `account ${me.status}`, status: me.status };
+    }
+    return { token: { host, access: data.access_token, accountId, expires: now() + (Number(data.expires_in) || 300) * 1000 - 60e3 } };
+  }
+
   async function signIn() {
-    const st = state.get() || {};
-    let deviceId = st.deviceId;
+    let deviceId = (state.get() || {}).deviceId;
     if (!deviceId) {
       deviceId = require('crypto').randomUUID();
       state.patch({ deviceId });
     }
-    // Same device as the website's own sign-in when AniTrack has seen it (see the Mac app's capture).
-    const body = new URLSearchParams({ grant_type: 'etp_rt_cookie', scope: 'offline_access', device_id: deviceId });
-    if (st.deviceType) body.set('device_type', st.deviceType);
-    if (st.deviceName) body.set('device_name', st.deviceName);
-    const res = await call(`${base}/auth/v1/token`, {
-      method: 'POST',
-      headers: { Authorization: st.basic || WEB_CLIENT, 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: body.toString(),
-    });
-    if (res.status === 400 || res.status === 401) throw new CrError('Not signed in to Crunchyroll in AniTrack.', 'signed-out');
-    if (!res.ok) throw new CrError(`Crunchyroll sign-in failed (${res.status}).`, res.status === 403 ? 'challenge' : 'http');
-    const data = await res.json().catch(() => null);
-    if (!data?.access_token) throw new CrError('Crunchyroll answered the sign-in in an unexpected way.', 'shape');
-    let accountId = data.account_id;
-    if (!accountId) {
-      const me = await call(`${base}/accounts/v1/me`, { headers: { Authorization: `Bearer ${data.access_token}` } });
-      accountId = me.ok ? (await me.json().catch(() => null))?.account_id : null;
-      if (!accountId) throw new CrError('Could not read your Crunchyroll account.', 'shape');
+    const tries = [];
+    for (const host of hosts) {
+      const r = await signInAt(host, deviceId);
+      if (r.token) return (token = r.token);
+      tries.push({ host, ...r });
     }
-    token = { access: data.access_token, accountId, expires: now() + (Number(data.expires_in) || 300) * 1000 - 60e3 };
-    return token;
+    const detail = tries.map((t) => `${new URL(t.host).hostname}: ${t.error}`).join('; ');
+    const refused = tries.every((t) => t.status === 400 || t.status === 401);
+    throw new CrError(refused ? `Crunchyroll refused AniTrack's sign-in (${detail}).` : `Crunchyroll sign-in failed (${detail}).`, refused ? 'signed-out' : tries.some((t) => t.status === 403) ? 'challenge' : 'http');
   }
 
   // Newest first, stopping once entries are older than `since`.
   async function history(since) {
     const items = [];
     if (!token || token.expires < now()) await signIn();
-    let url = `${base}/content/v2/${encodeURIComponent(token.accountId)}/watch-history?page_size=100&locale=en-US`;
+    const host = token.host;
+    let url = `${host}/content/v2/${encodeURIComponent(token.accountId)}/watch-history?page_size=100&locale=en-US`;
     for (let page = 0; url && page < MAX_PAGES; page += 1) {
       let res = await call(url, { headers: { Authorization: `Bearer ${token.access}`, Accept: 'application/json' } });
       if (res.status === 401) {
         await signIn(); // expired: once
         res = await call(url, { headers: { Authorization: `Bearer ${token.access}`, Accept: 'application/json' } });
       }
-      if (!res.ok) throw new CrError(`Crunchyroll history failed (${res.status}).`, res.status === 401 ? 'signed-out' : 'http');
+      if (!res.ok) throw new CrError(`Crunchyroll history failed (${await why(res)}).`, res.status === 401 ? 'signed-out' : 'http');
       const body = await res.json().catch(() => null);
       if (!Array.isArray(body?.data)) throw new CrError('Crunchyroll answered the history request in an unexpected way.', 'shape');
       items.push(...body.data);
       const oldest = Math.min(...body.data.map((x) => Date.parse(x.date_played || '') || Infinity));
       const next = body.meta?.next_page;
       if (!body.data.length || !next || oldest < since) break;
-      url = /^https:\/\//.test(next) ? next : `${base}${next.startsWith('/') ? '' : '/'}${next}`;
-      if (!url.startsWith(`${base}/`)) break; // never send the token anywhere else
+      url = /^https?:\/\//.test(next) ? next : `${host}${next.startsWith('/') ? '' : '/'}${next}`;
+      if (!url.startsWith(`${host}/`)) break; // never send the token anywhere else
     }
     return items;
   }

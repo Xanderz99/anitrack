@@ -600,7 +600,7 @@ async function syncCrunchyroll(manual) {
     try {
       result = await syncOnce({ client: crClient, state: crState, entries, threshold: Number(settings.get('autoMarkPct')) || 0.9 });
     } catch (e) {
-      if (e.kind === 'signed-out') return fail('Crunchyroll signed AniTrack out. Sign in to Crunchyroll again.', 'signed-out');
+      if (e.kind === 'signed-out') return fail(`${e.message} If you are signed out, press Sign in to Crunchyroll, sign in and close that window.`, 'signed-out');
       return fail(e.kind === 'challenge' ? 'Crunchyroll asked for a browser check. Open Sign in to Crunchyroll, let the page load, then Sync now.' : e.message, e.kind || 'http');
     }
     const done = [];

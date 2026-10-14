@@ -85,7 +85,21 @@ test('client: signs in with the session cookie grant, pages through history, sta
   assert.strictEqual(grant.init.headers.Authorization, WEB_CLIENT);
   assert.match(grant.init.body, /grant_type=etp_rt_cookie/);
   assert.ok(state.get().deviceId, 'a device id is kept for next time');
-  assert.ok(cr.calls.slice(1).every((c) => c.url.startsWith('https://www.crunchyroll.com/') && c.init.headers.Authorization === 'Bearer tok1'));
+  assert.match(grant.url, /^https:\/\/beta-api\.crunchyroll\.com\//, 'the API host first');
+  assert.ok(cr.calls.slice(1).every((c) => c.url.startsWith('https://beta-api.crunchyroll.com/') && c.init.headers.Authorization === 'Bearer tok1'));
+});
+
+test('client: if the API host refuses, the website host is tried, and history follows the host that worked', async () => {
+  const cr = fakeCrunchyroll();
+  const fetch = (url, init) => (url.startsWith('https://beta-api.') ? Promise.resolve({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: 'invalid_client' }) }) : cr.fetch(url, init));
+  const items = await createCrClient({ fetch, state: memState() }).history(0);
+  assert.strictEqual(items.length, 3);
+  assert.ok(cr.calls.every((c) => c.url.startsWith('https://www.crunchyroll.com/')));
+});
+
+test('client: a refused sign-in says what each host answered', async () => {
+  const refuse = async () => ({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: 'invalid_grant' }) });
+  await assert.rejects(createCrClient({ fetch: refuse, state: memState() }).history(0), (e) => e.kind === 'signed-out' && /beta-api\.crunchyroll\.com: 401 invalid_grant; www\.crunchyroll\.com: 401 invalid_grant/.test(e.message));
 });
 
 test('client: stops paging once history is older than needed; renews an expired token once', async () => {
