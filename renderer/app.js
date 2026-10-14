@@ -487,7 +487,11 @@
   }
 
   // Watch, status and the episode stepper: shared by cards and the details page.
-  function actsHtml(s) {
+  // Brand colours for the Watch on buttons (other services get a neutral button).
+  const SVC = { crunchyroll: '#f47521', netflix: '#e50914', hidive: '#00aeef', hulu: '#1ce783', 'disney': '#113ccf', 'prime video': '#00a8e1', amazon: '#00a8e1', youtube: '#ff0033', 'max': '#002be7', bilibili: '#00a1d6', 'tubi': '#7408ff', retrocrush: '#e4002b' };
+  const svcColor = (site) => SVC[Object.keys(SVC).find((k) => String(site).toLowerCase().includes(k))] || 'var(--chip)';
+
+  function actsHtml(s, { noWatch = false } = {}) {
     const me = s.me;
     const total = s.episodes ? ` / ${s.episodes}` : '';
     // A show on your AniList list is taken off it with "Remove from list" (asks first: it deletes the
@@ -497,7 +501,7 @@
     const opts = choices.map((v) => `<option value="${v}" ${me.status === v || (!me.status && v === '') ? 'selected' : ''}>${label(v)}</option>`).join('');
     const status = me.status && !choices.includes(me.status) ? `<option value="${me.status}" selected>${STATUS_LABEL[me.status]}</option>` : '';
     return `<div class="acts">
-          <button class="btn primary small" data-act="watch">${esc(watchLabel(s))}</button>
+          ${noWatch ? '' : `<button class="btn primary small" data-act="watch">${esc(watchLabel(s))}</button>`}
           <select data-act="status" aria-label="Status for ${esc(s.title)}">${opts}${status}</select>
           ${
             me.status === 'WATCHING'
@@ -1042,11 +1046,22 @@
     const top = sheet.scrollTop;
     const facts = [d.format?.replace('_', ' '), d.episodes ? `${d.episodes} episodes` : '', d.season, d.studio, d.score ? `${d.score}% on AniList` : ''].filter(Boolean).join(' · ');
     const pct = d.me.status && d.episodes ? Math.min(100, Math.round((d.me.progress / d.episodes) * 100)) : 0;
-    const streams = d.streams.map((x) => `<button class="btn small" data-act="ext" data-url="${esc(x.url)}">${esc(x.site)} ↗</button>`).join('');
+    // One big button per service, in its colours. Crunchyroll goes through Watch (resume point, marking
+    // the episode); the others open their page and AniTrack asks about the episode when you come back.
+    const services = d.streams
+      .map((x) => {
+        const cr = /crunchyroll/i.test(x.site);
+        const wl = watchLabel(d);
+        const label = cr ? (/^Resume/.test(wl) ? `Crunchyroll · ${wl}` : 'Crunchyroll') : x.site;
+        return `<button class="btn svc" style="--svc:${svcColor(x.site)}" data-act="${cr ? 'watch' : 'watchOn'}" data-url="${esc(x.url)}">▶ ${esc(label)}</button>`;
+      })
+      .join('');
+    const art = d.banner || d.coverXL || d.cover;
     const related = d.related
       .map((x) => `<button class="rel-item" data-act="details" data-id="${x.id}"><span class="sub">${esc(x.relation)}${x.format ? ` · ${esc(x.format.replace('_', ' '))}` : ''}</span><span>${esc(x.title)}</span>${x.me.status ? `<span class="chip">${esc(STATUS_LABEL[x.me.status] || '')}</span>` : ''}</button>`)
       .join('');
-    sheet.innerHTML = `<div class="d-head" data-id="${d.id}">
+    sheet.innerHTML = `${art ? `<div class="d-art${d.banner ? '' : ' poster-art'}" style="background-image:url('${cssUrl(art)}')${d.color ? `;background-color:${esc(d.color)}` : ''}" aria-hidden="true"></div>` : ''}
+      <div class="d-head" data-id="${d.id}">
         <div class="d-cover" style="${d.color ? `background:${esc(d.color)}` : ''}">${d.coverXL || d.cover ? `<img src="${esc(d.coverXL || d.cover)}" alt="" decoding="async">` : ''}</div>
         <div class="d-title"><h2>${esc(d.title)}</h2>${d.romaji && d.romaji !== d.title ? `<div class="sub">${esc(d.romaji)}</div>` : ''}
           <div class="meta">${esc(facts)}</div>
@@ -1055,12 +1070,13 @@
         <button class="link d-close" data-sheet-close aria-label="Close">✕</button>
       </div>
       <div class="d-body" data-id="${d.id}">
-        ${actsHtml(d)}
+        <h3>Watch on</h3>
+        ${services ? `<div class="svc-row">${services}</div>` : '<p class="note">AniList does not list a streaming service for this show yet.</p>'}
+        ${actsHtml(d, { noWatch: true })}
         ${nextLine(d)}
         ${pct ? `<div class="hero-prog"><span class="track"><i style="width:${pct}%"></i></span><span>${d.me.progress}${d.episodes ? ` of ${d.episodes}` : ''} watched</span></div>` : ''}
         ${d.synopsis ? (d.spoiler && store.get('hideSpoilers', true) && !S.revealed.has(d.id) ? `<button class="synopsis spoiler" data-act="reveal" aria-label="Show the synopsis. It may spoil the earlier season."><span class="blur" aria-hidden="true">${esc(d.synopsis.slice(0, 400))}</span><span class="spoiler-tag">May spoil the earlier season · tap to show</span></button>` : `<p class="synopsis">${esc(d.synopsis)}</p>`) : ''}
         ${d.genres.length ? `<div class="chips">${d.genres.map((g) => `<span class="chip">${esc(g)}</span>`).join('')}</div>` : ''}
-        ${streams ? `<h3>Where to watch</h3><div class="d-row">${streams}</div>` : ''}
         ${d.trailer ? `<h3>Trailer</h3><div class="d-row"><button class="btn small" data-act="ext" data-url="${esc(d.trailer)}">▶ Watch the trailer ↗</button></div>` : ''}
         ${related ? `<h3>Related</h3><div class="d-related">${related}</div>` : ''}
         <div class="sheet-foot">${d.siteUrl ? `<button class="link" data-act="ext" data-url="${esc(d.siteUrl)}">Open on AniList ↗</button>` : '<span></span>'}<button class="link" data-sheet-close>Close</button></div>
@@ -1373,7 +1389,15 @@
       renderDetails();
     } else if (act === 'details' && id) openDetails(id);
     else if (act === 'ext') window.api.openExternal(btn.dataset.url);
-    else if (act === 'watch' && id) {
+    else if (act === 'watchOn' && id) {
+      // Another service: open it, and ask about the episode on return as with Crunchyroll in the browser.
+      closeSheet();
+      window.api.openExternal(btn.dataset.url);
+      if (s) {
+        S.pending = { id, ep: (s.me.progress || 0) + 1, title: s.title, t: Date.now() };
+        store.set('pending', S.pending);
+      }
+    } else if (act === 'watch' && id) {
       if (document.querySelector('.sheet-back')) closeSheet();
       const r = await window.api.watch(id);
       if (r.ok && r.external && s) {

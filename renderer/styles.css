@@ -356,3 +356,17 @@ details.adv > summary { color: var(--muted); cursor: pointer; margin-bottom: 10p
 .cr-unmatched { display: flex; flex-direction: column; gap: 8px; }
 .cr-unmatched select { display: block; margin-top: 4px; max-width: 100%; }
 .cr-actions { margin-top: 8px; }
+
+/* ===== Show page: artwork on top, then Watch on buttons ===== */
+.sheet.detail { position: relative; isolation: isolate; }
+.d-art { position: relative; z-index: -1; margin: -18px -20px 0; height: 190px; flex: none; background-size: cover; background-position: center 25%; border-radius: 20px 20px 0 0;
+  -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
+.d-art.poster-art { background-position: center 20%; }
+.d-art + .d-head h2 { text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6); }
+.d-art + .d-head { margin-top: -78px; align-items: end; }
+.d-art + .d-head .d-close { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.55); color: #fff; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.svc-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn.svc { flex: 1 1 140px; height: 46px; border-radius: 12px; font-size: 15px; font-weight: 650; background: var(--svc); color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.btn.svc:hover { filter: brightness(1.08); }
+@media (max-width: 760px) { .d-art { height: 170px; } .d-art + .d-head { margin-top: -70px; } }
