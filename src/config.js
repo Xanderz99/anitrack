@@ -7,6 +7,6 @@
 // The Mac app uses the same client: its login window catches the redirect before the page loads.
 // Leave it empty and the app asks each person for their own client ID instead (the old behaviour).
 module.exports = {
-  anilistClientId: '',
+  anilistClientId: '53103',
   webUrl: 'https://xanderz99.github.io/anitrack/',
 };
