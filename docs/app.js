@@ -2181,7 +2181,8 @@ window.__require = require;
     }[u.status];
     const btns = [
       u.status === 'ready' ? '<button class="btn small primary" data-act="installUpdate">Restart now</button>' : '',
-      ['idle', 'current', 'error'].includes(u.status) ? '<button class="btn small" data-act="checkUpdate">Check for updates</button>' : '',
+      ['idle', 'current', 'error', 'manual'].includes(u.status) ? '<button class="btn small" data-act="checkUpdate">Check for updates</button>' : '',
+      ['current', 'error'].includes(u.status) ? '<button class="btn small" data-act="checkUpdate" data-force="1">Reinstall latest version</button>' : '',
       ['manual', 'error'].includes(u.status) ? `<button class="btn small" data-act="ext" data-url="${RELEASE_PAGE}">Download page ↗</button>` : '',
     ].join('');
     return `<div class="field"><label>Version</label><div>${ver}${text ? ` · ${text}` : ''}${btns ? `<div class="d-row cr-actions">${btns}</div>` : ''}</div></div>`;
@@ -2741,9 +2742,12 @@ window.__require = require;
     }
     if (act === 'checkUpdate') {
       btn.disabled = true;
-      S.data = await window.api.checkUpdate();
+      const force = !!btn.dataset.force;
+      btn.textContent = force ? 'Downloading…' : 'Checking…';
+      S.data = await window.api.checkUpdate({ force });
       const u = S.data.update;
       if (u.status === 'current') toast('AniTrack is up to date.');
+      else if (u.status === 'ready' && force) toast('The latest version is downloaded.', { label: 'Restart now', fn: () => window.api.installUpdate() });
       else if (u.error) toast(u.error);
       render();
       return;
@@ -2961,6 +2965,7 @@ window.__require = require;
     }
   });
   window.api.on('login', handoffSheet);
+  window.api.on('nav', (view) => VIEWS.some((v) => v.id === view) && go(view)); // Mac menu: Settings…
   window.api.on('toast', (t) => (typeof t === 'string' ? toast(t) : toast(t.msg, t.action)));
   window.api.on('player', (p) => {
     S.player = p;

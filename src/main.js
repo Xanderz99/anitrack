@@ -408,6 +408,7 @@ function updateTray() {
       ...(items.length ? items : [{ label: 'No tracked episodes coming up', enabled: false }]),
       { type: 'separator' },
       { label: 'Open AniTrack', click: showMain },
+      { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
       { label: 'Quit', role: 'quit' },
     ])
   );
@@ -517,8 +518,8 @@ function registerIpc() {
     }
     return payload();
   });
-  ipcMain.handle('update:check', async () => {
-    if (updater) await updater.check();
+  ipcMain.handle('update:check', async (_e, opts) => {
+    if (updater) await updater.check({ force: !!opts?.force });
     return payload();
   });
   ipcMain.handle('update:install', () => {
@@ -632,6 +633,63 @@ function buildSha() {
     return null;
   }
 }
+// AniTrack menu > Check for Updates…: checks now and says what it found in a dialog.
+async function checkForUpdatesNow() {
+  if (!updater) {
+    dialog.showMessageBox({ message: 'Updates are not available for this copy', detail: 'Copies built on this Mac (npm run app) or run with npm start do not update themselves. Get the download from GitHub to have updates install by themselves.', buttons: ['Open download page', 'OK'], defaultId: 1 })
+      .then(({ response }) => response === 0 && shell.openExternal(RELEASE_PAGE));
+    return;
+  }
+  const st = await updater.check();
+  send('data', payload());
+  const build = st.sha ? `You have build ${st.sha.slice(0, 7)}.` : '';
+  if (st.status === 'ready') {
+    const { response } = await dialog.showMessageBox({ message: 'An AniTrack update is ready', detail: 'Restart now to install it, or it installs when you quit AniTrack.', buttons: ['Restart now', 'Later'], defaultId: 0 });
+    if (response === 0 && updater.install({ relaunch: true })) setTimeout(() => app.quit(), 200);
+  } else if (st.status === 'current') {
+    const { response } = await dialog.showMessageBox({ message: 'AniTrack is up to date', detail: build, buttons: ['OK', 'Reinstall latest version'], defaultId: 0 });
+    if (response === 1) {
+      await updater.check({ force: true });
+      send('data', payload());
+      if (updater.state().status === 'ready') checkForUpdatesNow();
+      else dialog.showMessageBox({ message: 'Could not reinstall', detail: updater.state().error || '' });
+    }
+  } else {
+    const { response } = await dialog.showMessageBox({ message: st.status === 'manual' ? 'An update is available' : 'Could not check for updates', detail: `${st.error || ''} ${build}`.trim(), buttons: ['Open download page', 'OK'], defaultId: 1 });
+    if (response === 0) shell.openExternal(RELEASE_PAGE);
+  }
+}
+const RELEASE_PAGE = 'https://github.com/Xanderz99/anitrack/releases/tag/mac-latest';
+
+// The menu bar at the top of the screen: the usual Mac menus, plus Check for Updates….
+function setAppMenu() {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
+          { type: 'separator' },
+          { label: 'Settings…', accelerator: 'Cmd+,', click: () => { showMain(); send('nav', 'settings'); } },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      { role: 'editMenu' },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+    ])
+  );
+}
+
 function setupUpdater() {
   if (!app.isPackaged || process.platform !== 'darwin' || !buildSha()) return; // copies run with npm start update with git
   updater = createUpdater({
@@ -765,6 +823,7 @@ app.whenReady().then(async () => {
   setInterval(checkAirings, 60e3);
   setInterval(() => refresh({}).then((p) => send('data', p)).catch(() => {}), 3600e3);
   setupUpdater();
+  setAppMenu();
   setTimeout(() => syncCrunchyroll(false).catch(() => {}), 45e3);
   setInterval(() => syncCrunchyroll(false).catch(() => {}), 30 * 60e3);
   app.on('activate', () => {

@@ -94,3 +94,10 @@ test('if the swap fails half way, the old app is put back', () => {
   execFileSync('/bin/sh', [script]);
   assert.strictEqual(fs.readFileSync(path.join(appPath, 'Contents', 'Info.plist'), 'utf8'), 'old');
 });
+
+test('force downloads the latest release even when it is the build already running', async () => {
+  const { appPath, workDir } = installed();
+  const u = createUpdater({ fetch: fakeFetch(release('abc1234def')), currentSha: 'abc1234def', arch: 'arm64', appPath, workDir, run: fakeUnzip, spawnDetached: () => {} });
+  assert.strictEqual((await u.check()).status, 'current');
+  assert.strictEqual((await u.check({ force: true })).status, 'ready');
+});

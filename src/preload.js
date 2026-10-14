@@ -2,7 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
-const EVENTS = ['data', 'toast', 'player'];
+const EVENTS = ['data', 'toast', 'player', 'nav'];
 
 contextBridge.exposeInMainWorld('api', {
   init: () => invoke('app:init'),
@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   exportCalendar: () => invoke('calendar:export'),
   playerExternal: () => invoke('player:external'),
   openExternal: (url) => invoke('open:external', url),
-  checkUpdate: () => invoke('update:check'),
+  checkUpdate: (opts) => invoke('update:check', opts),
   installUpdate: () => invoke('update:install'),
   crSyncNow: () => invoke('crsync:now'),
   crSignIn: () => invoke('crsync:signin'),

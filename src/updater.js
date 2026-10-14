@@ -75,7 +75,9 @@ function createUpdater({ fetch, currentSha, arch, appPath, workDir, run, spawnDe
     return null;
   }
 
-  async function check() {
+  // `force`: download the latest release even if it is the build already running (to repair or
+  // reinstall it).
+  async function check({ force = false } = {}) {
     if (busy) return busy;
     busy = (async () => {
       if (ready) return { ...state };
@@ -89,7 +91,7 @@ function createUpdater({ fetch, currentSha, arch, appPath, workDir, run, spawnDe
       } catch (e) {
         return set({ status: 'error', error: `Could not check for updates: ${e.message}`, checkedAt: Date.now() });
       }
-      const r = readRelease(release, currentSha, arch);
+      const r = readRelease(release, force ? null : currentSha, arch);
       if (r.status !== 'available') return set({ status: r.status, latest: r.sha || null, error: r.error || null, checkedAt: Date.now() });
       const blocked = canReplace();
       if (blocked) return set({ status: 'manual', latest: r.sha, error: blocked, checkedAt: Date.now() });
